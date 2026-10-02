@@ -1,30 +1,24 @@
 """
 Connect Aligned Dimensions  (Dynamo Python node for Revit)
 
-Pick the parallel dimension strings you want to tie together, then press
-Finish on the Options Bar. Each string that shares a witness line position
-with a string closer to the building is given its own copy of its dimension
-type, set to "Fixed to Dimension Line" with a witness line length that
-reaches that inner string. The witness lines are then part of the dimension
-and move with it. (Revit's API cannot lengthen individual witness lines, so
-every witness line on that string gets the same length.)
+Pick the parallel dimension strings you want to tidy, then press Finish on
+the Options Bar. The strings are spaced a set distance apart, moving outward
+from the one closest to the building.
 
-Optionally, when the same segment (same start and end witness lines) appears
+When the same segment (same start and end witness lines) appears
 in more than one picked string, it is removed from every string except the
 one furthest from the building. Revit cannot delete a segment from the middle
 of a string, so the inner string is rebuilt as separate strings either side of
 the removed segment, keeping each segment's text overrides.
 
 Inputs
-    IN[0]  Extend the witness lines past the inner string by the dimension
-           type's "Witness Line Extension" (bool).
-    IN[1]  Remove duplicate segments from the inner strings (bool).
-    IN[2]  Only remove duplicates longer than this, in mm (number). The
+    IN[0]  Remove duplicate segments from the inner strings (bool).
+    IN[1]  Only remove duplicates longer than this, in mm (number). The
            default 90 keeps 90 mm walls on every string but removes thicker
            walls (e.g. 240) and rooms. Walls this short that are left with
            no room either side after the removal are deleted as well, and
            the number on the rest is hidden where an outer string shows it.
-    IN[3]  Space the strings this far apart, in mm (number, model size).
+    IN[2]  Space the strings this far apart, in mm (number, model size).
            The string closest to the building stays put; the others move
            outward. 0 leaves the strings where they are.
 Output
@@ -33,15 +27,13 @@ Output
 Works with IronPython 2.7, CPython3 and PythonNet3 engines.
 """
 import clr
-import re
 import uuid
 
 clr.AddReference("RevitAPI")
 clr.AddReference("RevitAPIUI")
 clr.AddReference("RevitServices")
-from Autodesk.Revit.DB import (BuiltInParameter, Dimension, DimensionType,
-                               ElementTransformUtils, FilteredElementCollector,
-                               Line, Reference, ReferenceArray)
+from Autodesk.Revit.DB import (Dimension, ElementTransformUtils, Line,
+                               Reference, ReferenceArray)
 from Autodesk.Revit.Exceptions import OperationCanceledException
 from Autodesk.Revit.UI.Selection import ISelectionFilter, ObjectType
 from System.Collections.Generic import List
@@ -51,14 +43,13 @@ from RevitServices.Transactions import TransactionManager
 doc = DocumentManager.Instance.CurrentDBDocument
 uidoc = DocumentManager.Instance.CurrentUIApplication.ActiveUIDocument
 
-EXTEND = bool(IN[0]) if len(IN) > 0 and IN[0] is not None else False
-REMOVE_DUPES = bool(IN[1]) if len(IN) > 1 and IN[1] is not None else True
+REMOVE_DUPES = bool(IN[0]) if len(IN) > 0 and IN[0] is not None else True
 
 MM = 1.0 / 304.8            # Revit internal units are feet
 POS_TOL = 0.5 * MM          # witness lines closer than this count as aligned
 PARALLEL_TOL = 1e-6
-MIN_DUPE_LEN = (float(IN[2]) if len(IN) > 2 and IN[2] is not None else 90.0) * MM
-SPACING = (float(IN[3]) if len(IN) > 3 and IN[3] is not None else 600.0) * MM
+MIN_DUPE_LEN = (float(IN[1]) if len(IN) > 1 and IN[1] is not None else 90.0) * MM
+SPACING = (float(IN[2]) if len(IN) > 2 and IN[2] is not None else 600.0) * MM
 
 
 def as_linear_dim(el):
@@ -105,35 +96,6 @@ def pick_dimensions():
             seen.add(el.Id.IntegerValue)
             dims.append(el)
     return dims
-
-
-def witness_points(dim):
-    """Points on the dimension line where each witness line meets it."""
-    d = dim.Curve.Direction.Normalize()
-    if dim.NumberOfSegments == 0:
-        segs = [(dim.Origin, dim.Value)]
-    else:
-        segs = [(s.Origin, s.Value) for s in dim.Segments]
-    pts = []
-    for origin, value in segs:
-        if value is None:
-            continue
-        half = d.Multiply(value / 2.0)
-        pts.append(origin.Subtract(half))
-        pts.append(origin.Add(half))
-    return pts
-
-
-def witness_extension(dtype):
-    """Witness Line Extension of a dimension type, in paper feet."""
-    p = None
-    try:
-        p = dtype.get_Parameter(BuiltInParameter.WITNS_LINE_EXTENSION)
-    except Exception:
-        pass
-    if p is None:
-        p = dtype.LookupParameter("Witness Line Extension")
-    return p.AsDouble() if p is not None else 2.0 * MM
 
 
 def group_parallel(dims):
@@ -327,83 +289,6 @@ def rebuild_without(dim, remove, view):
     return created
 
 
-def plan_witness_lengths(group, view):
-    """[(dim, paper length)] for each string that shares a witness line with
-    a string closer to the building: the length reaching the nearest one."""
-    d = group["dir"]
-    perp = view.ViewDirection.CrossProduct(d).Normalize()
-    base = group["dims"][0].Curve.Origin
-    s_bld = building_side(group["dims"], view, base, perp)
-    if s_bld is None:
-        return None
-    info = []
-    for dim in group["dims"]:
-        off = dim.Curve.Origin.Subtract(base).DotProduct(perp) - s_bld
-        ts = [p.Subtract(base).DotProduct(d) for p in witness_points(dim)]
-        info.append((dim, off, ts))
-
-    result = []
-    for dim, off, ts in info:
-        inner = None
-        for dim2, off2, ts2 in info:
-            if off * off2 <= 0 or abs(off2) >= abs(off) - POS_TOL:
-                continue              # other side of the building, or not inside
-            if not any(abs(t - t2) <= POS_TOL for t in ts for t2 in ts2):
-                continue
-            if inner is None or abs(off2) > abs(inner[1]):
-                inner = (dim2, off2)
-        if inner is None:
-            continue
-        length = (abs(off) - abs(inner[1])) / view.Scale
-        if EXTEND:
-            length += witness_extension(inner[0].DimensionType)
-        result.append((dim, length))
-    return result
-
-
-# Matches the suffix added by this script (current and older names).
-TYPE_SUFFIX = re.compile(r" - [0-9.]+(mm)? Witness( @1:[0-9]+)?$")
-
-
-def set_fixed_witness_control(dtype):
-    """Set Witness Line Control to Fixed to Dimension Line. Returns success."""
-    p = dtype.LookupParameter("Witness Line Control")
-    if p is None or p.IsReadOnly:
-        return False
-    for value in (1, 0, 2):
-        try:
-            p.Set(value)
-            if "fixed" in (p.AsValueString() or "").lower():
-                return True
-        except Exception:
-            pass
-    return False
-
-
-def fixed_witness_type(dtype, length, scale):
-    """Copy of dtype whose witness lines are fixed at length (paper feet).
-
-    Named after the model length at the view scale, e.g.
-    "Standard Dimension - 600 Witness @1:100".
-    """
-    base_name = TYPE_SUFFIX.sub("", dtype.Name)
-    name = "{0} - {1:g} Witness @1:{2}".format(
-        base_name, round(length * scale / MM, 1), scale)
-    for t in FilteredElementCollector(doc).OfClass(DimensionType):
-        if t.Name == name:
-            return t
-    new = dtype.Duplicate(name)
-    if not set_fixed_witness_control(new):
-        doc.Delete(new.Id)
-        raise ValueError("couldn't set Witness Line Control on '{0}'".format(name))
-    p = new.LookupParameter("Witness Line Length")
-    if p is None or p.IsReadOnly:
-        doc.Delete(new.Id)
-        raise ValueError("no Witness Line Length on '{0}'".format(name))
-    p.Set(length)
-    return new
-
-
 def space_strings(group, view):
     """Move strings so each sits SPACING beyond the one inside it.
 
@@ -473,7 +358,7 @@ if dims is None:
 elif len(dims) < 2:
     OUT = "Pick at least two parallel dimension strings."
 else:
-    retyped = removed = hidden = spaced = 0
+    removed = hidden = spaced = 0
     TransactionManager.Instance.EnsureInTransaction(doc)
     for g in group_parallel(dims):
         if len(g["dims"]) < 2:
@@ -485,8 +370,6 @@ else:
             report.extend(problems)
             if n:
                 doc.Regenerate()
-        # Remove duplicates first so witness lines only reach strings that
-        # still share a witness line with them.
         if REMOVE_DUPES:
             plan = plan_duplicate_removal(g, view)
             if plan is None:
@@ -509,24 +392,11 @@ else:
             for seg in plan_hidden_values(g, view):
                 if hide_value(seg):
                     hidden += 1
-        lengths = plan_witness_lengths(g, view)
-        if lengths is None:
-            report.append("Couldn't tell which side the building is on - "
-                          "witness lines not changed.")
-            continue
-        for dim, length in lengths:
-            try:
-                dim.ChangeTypeId(fixed_witness_type(dim.DimensionType, length, view.Scale).Id)
-                retyped += 1
-            except Exception as ex:
-                report.append("Witness lines of dimension {0} not changed: {1}"
-                              .format(dim.Id.IntegerValue, ex))
     TransactionManager.Instance.TransactionTaskDone()
     report.insert(0, "{0} dimension(s) picked, {1} row(s) of strings moved, "
-                     "{2} string(s) given longer witness lines, "
-                     "{3} duplicate segment(s) removed, "
-                     "{4} repeated wall value(s) hidden."
-                  .format(len(dims), spaced, retyped, removed, hidden))
+                     "{2} duplicate segment(s) removed, "
+                     "{3} repeated wall value(s) hidden."
+                  .format(len(dims), spaced, removed, hidden))
     OUT = "\n".join(report)
 
 rearm_for_next_run()
