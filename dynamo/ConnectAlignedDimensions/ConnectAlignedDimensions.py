@@ -207,6 +207,25 @@ def plan_connections(group, view):
     return result
 
 
+def rearm_for_next_run():
+    """Mark this node as modified so the next Run executes it again.
+
+    Dynamo skips nodes whose inputs have not changed, which would stop the
+    picker from appearing a second time.
+    """
+    try:
+        clr.AddReference("DynamoRevitDS")
+        import Dynamo
+        ws = Dynamo.Applications.DynamoRevit.RevitDynamoModel.CurrentWorkspace
+        for node in ws.Nodes:
+            if getattr(node, "Script", None) and RERUN_MARKER in node.Script:
+                node.MarkNodeAsModified(True)
+    except Exception:
+        pass
+
+
+RERUN_MARKER = "ConnectAlignedDims_rerun_marker"
+
 report = []
 dims = pick_dimensions()
 if dims is None:
@@ -237,3 +256,5 @@ else:
     report.insert(0, "{0} dimension(s) picked, {1} connecting line(s) created, "
                      "{2} already existed.".format(len(dims), created, skipped))
     OUT = "\n".join(report)
+
+rearm_for_next_run()

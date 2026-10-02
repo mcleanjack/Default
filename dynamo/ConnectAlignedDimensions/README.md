@@ -24,6 +24,6 @@ read as one continuous line.
 ## Notes
 - Witness lines are treated as aligned when they are within 0.5 mm of each other (`POS_TOL`).
 - The script only joins strings that point the same way and sit in the same view. You can pick horizontal and vertical strings together.
-- Running it again does not draw a second copy of a line that is already there.
+- You can press Run again as many times as you like; each run brings the picker back. Running it again does not draw a second copy of a line that is already there.
 - The lines are ordinary detail lines, so they do not move with the dimensions.
 - The graph uses the CPython3 engine. If your Dynamo doesn't have that engine (for example, Revit 2025+ uses PythonNet3), pick the engine it has from the Python node's dropdown. The code works on IronPython2, CPython3 and PythonNet3.
