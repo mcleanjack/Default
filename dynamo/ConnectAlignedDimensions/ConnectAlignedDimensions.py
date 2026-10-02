@@ -8,10 +8,19 @@ outermost string to the opposite outermost string, so the witness lines read
 as one continuous line (e.g. both faces of a 90 mm wall running between an
 overall string and a room string).
 
+Optionally, when the same segment (same start and end witness lines) appears
+in more than one picked string, it is removed from every string except the
+one furthest from the building. Revit cannot delete a segment from the middle
+of a string, so the inner string is rebuilt as separate strings either side of
+the removed segment, keeping each segment's text overrides.
+
 Inputs
     IN[0]  Line style name (string). Blank or not found = Revit default style.
     IN[1]  Extend past the outer strings by the dimension type's
            "Witness Line Extension" (bool).
+    IN[2]  Remove duplicate segments from the inner strings (bool).
+    IN[3]  Only remove duplicates at least this long, in mm (number). Keeps
+           wall thicknesses (90, 240...) on every string.
 Output
     OUT    Report text.
 
@@ -25,7 +34,8 @@ clr.AddReference("RevitAPIUI")
 clr.AddReference("RevitServices")
 from Autodesk.Revit.DB import (BuiltInCategory, BuiltInParameter, CurveElement,
                                Dimension, FilteredElementCollector,
-                               GraphicsStyleType, Line, Reference)
+                               GraphicsStyleType, Line, Reference,
+                               ReferenceArray)
 from Autodesk.Revit.Exceptions import OperationCanceledException
 from Autodesk.Revit.UI.Selection import ISelectionFilter, ObjectType
 from System.Collections.Generic import List
@@ -37,10 +47,12 @@ uidoc = DocumentManager.Instance.CurrentUIApplication.ActiveUIDocument
 
 LINE_STYLE = IN[0] if len(IN) > 0 and IN[0] else ""
 EXTEND = bool(IN[1]) if len(IN) > 1 and IN[1] is not None else True
+REMOVE_DUPES = bool(IN[2]) if len(IN) > 2 and IN[2] is not None else True
 
 MM = 1.0 / 304.8            # Revit internal units are feet
 POS_TOL = 0.5 * MM          # witness lines closer than this count as aligned
 PARALLEL_TOL = 1e-6
+MIN_DUPE_LEN = (float(IN[3]) if len(IN) > 3 and IN[3] is not None else 300.0) * MM
 
 
 def as_linear_dim(el):
@@ -207,6 +219,118 @@ def plan_connections(group, view):
     return result
 
 
+def segment_intervals(dim, base, d):
+    """[(t_start, t_end, segment_index)] along d for each segment."""
+    if dim.NumberOfSegments == 0:
+        segs = [(dim.Origin, dim.Value)]
+    else:
+        segs = [(s.Origin, s.Value) for s in dim.Segments]
+    result = []
+    for i, (origin, value) in enumerate(segs):
+        if value is None:
+            continue
+        t = origin.Subtract(base).DotProduct(d)
+        result.append((t - value / 2.0, t + value / 2.0, i))
+    return result
+
+
+def building_side(dims, view, base, perp):
+    """Average position (across the strings) of the dimensioned elements."""
+    vals = []
+    for dim in dims:
+        for r in dim.References:
+            el = doc.GetElement(r.ElementId)
+            if el is None:
+                continue
+            bb = el.get_BoundingBox(view) or el.get_BoundingBox(None)
+            if bb is None:
+                continue
+            centre = bb.Min.Add(bb.Max).Multiply(0.5)
+            vals.append(centre.Subtract(base).DotProduct(perp))
+    return sum(vals) / len(vals) if vals else None
+
+
+def plan_duplicate_removal(group, view):
+    """[(dim, set(segment indices))] to remove, keeping the outermost copy."""
+    d = group["dir"]
+    perp = view.ViewDirection.CrossProduct(d).Normalize()
+    base = group["dims"][0].Curve.Origin
+    s_bld = building_side(group["dims"], view, base, perp)
+    if s_bld is None:
+        return None
+    info = []
+    for dim in group["dims"]:
+        s = dim.Curve.Origin.Subtract(base).DotProduct(perp)
+        info.append((dim, abs(s - s_bld), segment_intervals(dim, base, d)))
+
+    removals = []
+    for dim, dist, ivs in info:
+        remove = set()
+        for a, b, idx in ivs:
+            if b - a < MIN_DUPE_LEN:
+                continue
+            for dim2, dist2, ivs2 in info:
+                if dist2 <= dist + POS_TOL:
+                    continue          # only defer to strings further out
+                if any(abs(a - a2) <= POS_TOL and abs(b - b2) <= POS_TOL
+                       for a2, b2, _ in ivs2):
+                    remove.add(idx)
+                    break
+        if remove:
+            removals.append((dim, remove))
+    return removals
+
+
+TEXT_PROPS = ("Above", "Below", "Prefix", "Suffix", "ValueOverride")
+
+
+def copy_segment_text(src, dst):
+    for prop in TEXT_PROPS:
+        try:
+            val = getattr(src, prop)
+            if val:
+                setattr(dst, prop, val)
+        except Exception:
+            pass
+    try:
+        if src.IsTextPositionAdjustable():
+            dst.TextPosition = src.TextPosition
+    except Exception:
+        pass
+
+
+def rebuild_without(dim, remove, view):
+    """Replace dim by one string per run of kept segments. Returns success."""
+    refs = list(dim.References)
+    segs = [dim] if dim.NumberOfSegments == 0 else list(dim.Segments)
+    if len(refs) != len(segs) + 1:
+        return False
+    runs, cur = [], []
+    for i in range(len(segs)):
+        if i in remove:
+            if cur:
+                runs.append(cur)
+            cur = []
+        else:
+            cur.append(i)
+    if cur:
+        runs.append(cur)
+
+    d = dim.Curve.Direction.Normalize()
+    o = dim.Curve.Origin
+    line = Line.CreateBound(o.Subtract(d.Multiply(100.0)), o.Add(d.Multiply(100.0)))
+    for run in runs:
+        ra = ReferenceArray()
+        for k in range(run[0], run[-1] + 2):
+            ra.Append(refs[k])
+        new = doc.Create.NewDimension(view, line, ra, dim.DimensionType)
+        new_segs = [new] if new.NumberOfSegments == 0 else list(new.Segments)
+        for src, dst in zip([segs[i] for i in run], new_segs):
+            copy_segment_text(src, dst)
+    doc.Delete(dim.Id)
+    return True
+
+
 def rearm_for_next_run():
     """Mark this node as modified so the next Run executes it again.
 
@@ -236,7 +360,7 @@ else:
     style = find_line_style(LINE_STYLE)
     if LINE_STYLE and style is None:
         report.append("Line style '{0}' not found - default used.".format(LINE_STYLE))
-    created = skipped = 0
+    created = skipped = removed = 0
     TransactionManager.Instance.EnsureInTransaction(doc)
     for g in group_parallel(dims):
         if len(g["dims"]) < 2:
@@ -252,9 +376,22 @@ else:
                 curve.LineStyle = style
             existing.append((p0, p1))
             created += 1
+        if REMOVE_DUPES:
+            plan = plan_duplicate_removal(g, view)
+            if plan is None:
+                report.append("Couldn't tell which side the building is on - "
+                              "no duplicate segments removed.")
+                continue
+            for dim, remove in plan:
+                if rebuild_without(dim, remove, view):
+                    removed += len(remove)
+                else:
+                    report.append("Couldn't rebuild dimension {0} - left as is."
+                                  .format(dim.Id.IntegerValue))
     TransactionManager.Instance.TransactionTaskDone()
     report.insert(0, "{0} dimension(s) picked, {1} connecting line(s) created, "
-                     "{2} already existed.".format(len(dims), created, skipped))
+                     "{2} already existed, {3} duplicate segment(s) removed."
+                  .format(len(dims), created, skipped, removed))
     OUT = "\n".join(report)
 
 rearm_for_next_run()
