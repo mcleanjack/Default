@@ -19,8 +19,9 @@ Inputs
     IN[1]  Extend past the outer strings by the dimension type's
            "Witness Line Extension" (bool).
     IN[2]  Remove duplicate segments from the inner strings (bool).
-    IN[3]  Only remove duplicates at least this long, in mm (number). Keeps
-           wall thicknesses (90, 240...) on every string.
+    IN[3]  Only remove duplicates longer than this, in mm (number). The
+           default 90 keeps 90 mm walls on every string but removes thicker
+           walls (e.g. 240) and rooms.
 Output
     OUT    Report text.
 
@@ -52,7 +53,7 @@ REMOVE_DUPES = bool(IN[2]) if len(IN) > 2 and IN[2] is not None else True
 MM = 1.0 / 304.8            # Revit internal units are feet
 POS_TOL = 0.5 * MM          # witness lines closer than this count as aligned
 PARALLEL_TOL = 1e-6
-MIN_DUPE_LEN = (float(IN[3]) if len(IN) > 3 and IN[3] is not None else 300.0) * MM
+MIN_DUPE_LEN = (float(IN[3]) if len(IN) > 3 and IN[3] is not None else 90.0) * MM
 
 
 def as_linear_dim(el):
@@ -267,7 +268,7 @@ def plan_duplicate_removal(group, view):
     for dim, dist, ivs in info:
         remove = set()
         for a, b, idx in ivs:
-            if b - a < MIN_DUPE_LEN:
+            if b - a <= MIN_DUPE_LEN + POS_TOL:
                 continue
             for dim2, dist2, ivs2 in info:
                 if dist2 <= dist + POS_TOL:

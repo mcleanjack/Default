@@ -25,7 +25,7 @@ string furthest from the building and removed from the others.
 | Line Style | `Thin Lines` | Line style for the new lines. If it is blank or not found, Revit's default is used. |
 | Extend Past Outer Strings | `true` | Extends each line past the outer strings by the dimension type's *Witness Line Extension*. |
 | Remove Duplicate Segments | `true` | Removes repeated segments from strings closer to the building. |
-| Min Duplicate Length (mm) | `300` | Shorter repeats, such as 90 or 240 wall thicknesses, stay on every string. Set it to 0 to remove those too. |
+| Remove Duplicates Longer Than (mm) | `90` | Repeats this long or shorter (90 mm walls) stay on every string. Thicker walls, such as 240, and rooms are removed. Set it to 0 to remove 90 mm walls too. |
 
 ## Notes
 - Witness lines are treated as aligned when they are within 0.5 mm of each other (`POS_TOL`).
