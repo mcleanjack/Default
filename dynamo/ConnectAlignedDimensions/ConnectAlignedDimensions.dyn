@@ -1,5 +1,5 @@
 {
-  "Uuid": "49af9cec-07ab-4ad6-b834-cffde3d3ac4e",
+  "Uuid": "2f266d9c-fabe-4edf-90fa-c77241999fb8",
   "IsCustomNode": false,
   "Description": "Pick parallel dimension strings, click Finish, and detail lines are drawn joining every witness line the strings share.",
   "Name": "ConnectAlignedDimensions",
@@ -8,7 +8,7 @@
   },
   "Inputs": [
     {
-      "Id": "9f4045eda7be4f6b986802843ea20438",
+      "Id": "d56d4aa50b344ca48a6c3c6ae5ac92e9",
       "Name": "Line Style",
       "Type": "string",
       "Type2": "string",
@@ -16,7 +16,7 @@
       "Description": "Line style for the connecting lines (blank = default)."
     },
     {
-      "Id": "2fd2fe2e9ddc46f1b3eb77f56b81a167",
+      "Id": "6cd681f717404bc9a4f58bbfef3e375d",
       "Name": "Extend Past Outer Strings",
       "Type": "boolean",
       "Type2": "boolean",
@@ -26,7 +26,7 @@
   ],
   "Outputs": [
     {
-      "Id": "1969116ba83f41209dd00774f1a92725",
+      "Id": "8a1e955363394a7a8a4d570a1c3debf7",
       "Name": "Connect Aligned Dimensions",
       "Type": "unknown",
       "InitialValue": "",
@@ -38,11 +38,11 @@
       "ConcreteType": "CoreNodeModels.Input.StringInput, CoreNodeModels",
       "NodeType": "StringInputNode",
       "InputValue": "Thin Lines",
-      "Id": "9f4045eda7be4f6b986802843ea20438",
+      "Id": "d56d4aa50b344ca48a6c3c6ae5ac92e9",
       "Inputs": [],
       "Outputs": [
         {
-          "Id": "f5ca34d3ab6b4e05aef3b12b34c1c0bb",
+          "Id": "cd0d73003dda4f3a922848697f5b906a",
           "Name": "",
           "Description": "String",
           "UsingDefaultValue": false,
@@ -58,11 +58,11 @@
       "ConcreteType": "CoreNodeModels.Input.BoolSelector, CoreNodeModels",
       "NodeType": "BooleanInputNode",
       "InputValue": true,
-      "Id": "2fd2fe2e9ddc46f1b3eb77f56b81a167",
+      "Id": "6cd681f717404bc9a4f58bbfef3e375d",
       "Inputs": [],
       "Outputs": [
         {
-          "Id": "2c7ff80a4b5d4c348283dd6f04e7610c",
+          "Id": "eb80016f35104d86a514b690c137d9f6",
           "Name": "",
           "Description": "Boolean",
           "UsingDefaultValue": false,
@@ -77,13 +77,13 @@
     {
       "ConcreteType": "PythonNodeModels.PythonNode, PythonNodeModels",
       "NodeType": "PythonScriptNode",
-      "Code": "\"\"\"\nConnect Aligned Dimensions  (Dynamo Python node for Revit)\n\nPick the parallel dimension strings you want to tie together, then press\nFinish on the Options Bar. Wherever two or more of the picked strings have a\nwitness line at the same position, a detail line is drawn that runs from the\noutermost string to the opposite outermost string, so the witness lines read\nas one continuous line (e.g. both faces of a 90 mm wall running between an\noverall string and a room string).\n\nInputs\n    IN[0]  Line style name (string). Blank or not found = Revit default style.\n    IN[1]  Extend past the outer strings by the dimension type's\n           \"Witness Line Extension\" (bool).\nOutput\n    OUT    Report text.\n\nWorks with IronPython 2.7, CPython3 and PythonNet3 engines.\n\"\"\"\nimport clr\nimport uuid\n\nclr.AddReference(\"RevitAPI\")\nclr.AddReference(\"RevitAPIUI\")\nclr.AddReference(\"RevitServices\")\nfrom Autodesk.Revit.DB import (BuiltInCategory, BuiltInParameter, CurveElement,\n                               Dimension, FilteredElementCollector,\n                               GraphicsStyleType, Line, Reference)\nfrom Autodesk.Revit.Exceptions import OperationCanceledException\nfrom Autodesk.Revit.UI.Selection import ISelectionFilter, ObjectType\nfrom System.Collections.Generic import List\nfrom RevitServices.Persistence import DocumentManager\nfrom RevitServices.Transactions import TransactionManager\n\ndoc = DocumentManager.Instance.CurrentDBDocument\nuidoc = DocumentManager.Instance.CurrentUIApplication.ActiveUIDocument\n\nLINE_STYLE = IN[0] if len(IN) > 0 and IN[0] else \"\"\nEXTEND = bool(IN[1]) if len(IN) > 1 and IN[1] is not None else True\n\nMM = 1.0 / 304.8            # Revit internal units are feet\nPOS_TOL = 0.5 * MM          # witness lines closer than this count as aligned\nPARALLEL_TOL = 1e-6\n\n\ndef as_linear_dim(el):\n    \"\"\"Return el if it is a straight (linear/aligned) dimension, else None.\"\"\"\n    if el is None or not isinstance(el, Dimension):\n        return None\n    try:\n        crv = el.Curve\n    except Exception:       # spot dimensions etc. have no curve\n        return None\n    if crv is None or not isinstance(crv, Line):\n        return None\n    return el\n\n\nclass DimensionFilter(ISelectionFilter):\n    # PythonNet needs a unique namespace per run; IronPython ignores it.\n    __namespace__ = \"ConnectAlignedDims_\" + uuid.uuid4().hex\n\n    def AllowElement(self, element):\n        return as_linear_dim(element) is not None\n\n    def AllowReference(self, reference, position):\n        return False\n\n\ndef pick_dimensions():\n    \"\"\"Let the user pick dimensions; anything already selected is pre-picked.\"\"\"\n    pre = List[Reference]()\n    for eid in uidoc.Selection.GetElementIds():\n        el = as_linear_dim(doc.GetElement(eid))\n        if el is not None:\n            pre.Add(Reference(el))\n    prompt = \"Pick the dimension strings to connect, then click Finish\"\n    try:\n        refs = uidoc.Selection.PickObjects(ObjectType.Element, DimensionFilter(),\n                                           prompt, pre)\n    except OperationCanceledException:\n        return None\n    dims, seen = [], set()\n    for r in refs:\n        el = as_linear_dim(doc.GetElement(r.ElementId))\n        if el is not None and el.Id.IntegerValue not in seen:\n            seen.add(el.Id.IntegerValue)\n            dims.append(el)\n    return dims\n\n\ndef witness_points(dim):\n    \"\"\"Points on the dimension line where each witness line meets it.\"\"\"\n    d = dim.Curve.Direction.Normalize()\n    if dim.NumberOfSegments == 0:\n        segs = [(dim.Origin, dim.Value)]\n    else:\n        segs = [(s.Origin, s.Value) for s in dim.Segments]\n    pts = []\n    for origin, value in segs:\n        if value is None:\n            continue\n        half = d.Multiply(value / 2.0)\n        pts.append(origin.Subtract(half))\n        pts.append(origin.Add(half))\n    return pts\n\n\ndef witness_extension(dim, view):\n    \"\"\"Witness Line Extension of the dimension's type, in model units.\"\"\"\n    dtype = doc.GetElement(dim.GetTypeId())\n    p = None\n    try:\n        p = dtype.get_Parameter(BuiltInParameter.WITNS_LINE_EXTENSION)\n    except Exception:\n        pass\n    if p is None:\n        p = dtype.LookupParameter(\"Witness Line Extension\")\n    paper = p.AsDouble() if p is not None else 2.0 * MM\n    return paper * view.Scale\n\n\ndef find_line_style(name):\n    if not name:\n        return None\n    cat = doc.Settings.Categories.get_Item(BuiltInCategory.OST_Lines)\n    for sub in cat.SubCategories:\n        if sub.Name.strip().lower() == name.strip().lower():\n            return sub.GetGraphicsStyle(GraphicsStyleType.Projection)\n    return None\n\n\ndef group_parallel(dims):\n    \"\"\"Group dimensions by owner view and (anti)parallel direction.\"\"\"\n    groups = []\n    for dim in dims:\n        d = dim.Curve.Direction.Normalize()\n        for g in groups:\n            if (g[\"view\"] == dim.OwnerViewId.IntegerValue\n                    and abs(abs(g[\"dir\"].DotProduct(d)) - 1.0) < PARALLEL_TOL):\n                g[\"dims\"].append(dim)\n                break\n        else:\n            groups.append({\"view\": dim.OwnerViewId.IntegerValue,\n                           \"dir\": d, \"dims\": [dim]})\n    return groups\n\n\ndef existing_lines(view):\n    lines = []\n    for ce in FilteredElementCollector(doc, view.Id).OfClass(CurveElement):\n        c = ce.GeometryCurve\n        if c is not None and c.IsBound and isinstance(c, Line):\n            lines.append((c.GetEndPoint(0), c.GetEndPoint(1)))\n    return lines\n\n\ndef is_duplicate(p0, p1, lines):\n    for a, b in lines:\n        if ((a.IsAlmostEqualTo(p0, POS_TOL) and b.IsAlmostEqualTo(p1, POS_TOL)) or\n                (a.IsAlmostEqualTo(p1, POS_TOL) and b.IsAlmostEqualTo(p0, POS_TOL))):\n            return True\n    return False\n\n\ndef plan_connections(group, view):\n    \"\"\"Return [(p0, p1)] for every witness position shared by 2+ strings.\"\"\"\n    d = group[\"dir\"]\n    perp = view.ViewDirection.CrossProduct(d).Normalize()\n    base = group[\"dims\"][0].Origin\n\n    entries = []                      # (t along dims, s across dims, dim)\n    for dim in group[\"dims\"]:\n        s = dim.Origin.Subtract(base).DotProduct(perp)\n        ts = sorted(p.Subtract(base).DotProduct(d) for p in witness_points(dim))\n        last = None\n        for t in ts:\n            if last is None or t - last > POS_TOL:\n                entries.append((t, s, dim))\n            last = t\n    entries.sort(key=lambda e: e[0])\n\n    clusters, current = [], []\n    for e in entries:\n        if current and e[0] - current[-1][0] > POS_TOL:\n            clusters.append(current)\n            current = []\n        current.append(e)\n    if current:\n        clusters.append(current)\n\n    result = []\n    for cl in clusters:\n        if len(set(e[2].Id.IntegerValue for e in cl)) < 2:\n            continue\n        t = sum(e[0] for e in cl) / len(cl)\n        lo = min(cl, key=lambda e: e[1])\n        hi = max(cl, key=lambda e: e[1])\n        s0, s1 = lo[1], hi[1]\n        if s1 - s0 < POS_TOL:         # collinear strings, nothing to join\n            continue\n        if EXTEND:\n            s0 -= witness_extension(lo[2], view)\n            s1 += witness_extension(hi[2], view)\n        along = base.Add(d.Multiply(t))\n        result.append((along.Add(perp.Multiply(s0)), along.Add(perp.Multiply(s1))))\n    return result\n\n\nreport = []\ndims = pick_dimensions()\nif dims is None:\n    OUT = \"Cancelled - nothing changed.\"\nelif len(dims) < 2:\n    OUT = \"Pick at least two parallel dimension strings.\"\nelse:\n    style = find_line_style(LINE_STYLE)\n    if LINE_STYLE and style is None:\n        report.append(\"Line style '{0}' not found - default used.\".format(LINE_STYLE))\n    created = skipped = 0\n    TransactionManager.Instance.EnsureInTransaction(doc)\n    for g in group_parallel(dims):\n        if len(g[\"dims\"]) < 2:\n            continue\n        view = doc.GetElement(g[\"dims\"][0].OwnerViewId)\n        existing = existing_lines(view)\n        for p0, p1 in plan_connections(g, view):\n            if is_duplicate(p0, p1, existing):\n                skipped += 1\n                continue\n            curve = doc.Create.NewDetailCurve(view, Line.CreateBound(p0, p1))\n            if style is not None:\n                curve.LineStyle = style\n            existing.append((p0, p1))\n            created += 1\n    TransactionManager.Instance.TransactionTaskDone()\n    report.insert(0, \"{0} dimension(s) picked, {1} connecting line(s) created, \"\n                     \"{2} already existed.\".format(len(dims), created, skipped))\n    OUT = \"\\n\".join(report)\n",
+      "Code": "\"\"\"\nConnect Aligned Dimensions  (Dynamo Python node for Revit)\n\nPick the parallel dimension strings you want to tie together, then press\nFinish on the Options Bar. Wherever two or more of the picked strings have a\nwitness line at the same position, a detail line is drawn that runs from the\noutermost string to the opposite outermost string, so the witness lines read\nas one continuous line (e.g. both faces of a 90 mm wall running between an\noverall string and a room string).\n\nInputs\n    IN[0]  Line style name (string). Blank or not found = Revit default style.\n    IN[1]  Extend past the outer strings by the dimension type's\n           \"Witness Line Extension\" (bool).\nOutput\n    OUT    Report text.\n\nWorks with IronPython 2.7, CPython3 and PythonNet3 engines.\n\"\"\"\nimport clr\nimport uuid\n\nclr.AddReference(\"RevitAPI\")\nclr.AddReference(\"RevitAPIUI\")\nclr.AddReference(\"RevitServices\")\nfrom Autodesk.Revit.DB import (BuiltInCategory, BuiltInParameter, CurveElement,\n                               Dimension, FilteredElementCollector,\n                               GraphicsStyleType, Line, Reference)\nfrom Autodesk.Revit.Exceptions import OperationCanceledException\nfrom Autodesk.Revit.UI.Selection import ISelectionFilter, ObjectType\nfrom System.Collections.Generic import List\nfrom RevitServices.Persistence import DocumentManager\nfrom RevitServices.Transactions import TransactionManager\n\ndoc = DocumentManager.Instance.CurrentDBDocument\nuidoc = DocumentManager.Instance.CurrentUIApplication.ActiveUIDocument\n\nLINE_STYLE = IN[0] if len(IN) > 0 and IN[0] else \"\"\nEXTEND = bool(IN[1]) if len(IN) > 1 and IN[1] is not None else True\n\nMM = 1.0 / 304.8            # Revit internal units are feet\nPOS_TOL = 0.5 * MM          # witness lines closer than this count as aligned\nPARALLEL_TOL = 1e-6\n\n\ndef as_linear_dim(el):\n    \"\"\"Return el if it is a straight (linear/aligned) dimension, else None.\"\"\"\n    if el is None or not isinstance(el, Dimension):\n        return None\n    try:\n        crv = el.Curve\n    except Exception:       # spot dimensions etc. have no curve\n        return None\n    if crv is None or not isinstance(crv, Line):\n        return None\n    return el\n\n\nclass DimensionFilter(ISelectionFilter):\n    # PythonNet needs a unique namespace per run; IronPython ignores it.\n    __namespace__ = \"ConnectAlignedDims_\" + uuid.uuid4().hex\n\n    def AllowElement(self, element):\n        return as_linear_dim(element) is not None\n\n    def AllowReference(self, reference, position):\n        return False\n\n\ndef pick_dimensions():\n    \"\"\"Let the user pick dimensions; anything already selected is pre-picked.\"\"\"\n    pre = List[Reference]()\n    for eid in uidoc.Selection.GetElementIds():\n        el = as_linear_dim(doc.GetElement(eid))\n        if el is not None:\n            pre.Add(Reference(el))\n    prompt = \"Pick the dimension strings to connect, then click Finish\"\n    try:\n        refs = uidoc.Selection.PickObjects(ObjectType.Element, DimensionFilter(),\n                                           prompt, pre)\n    except OperationCanceledException:\n        return None\n    dims, seen = [], set()\n    for r in refs:\n        el = as_linear_dim(doc.GetElement(r.ElementId))\n        if el is not None and el.Id.IntegerValue not in seen:\n            seen.add(el.Id.IntegerValue)\n            dims.append(el)\n    return dims\n\n\ndef witness_points(dim):\n    \"\"\"Points on the dimension line where each witness line meets it.\"\"\"\n    d = dim.Curve.Direction.Normalize()\n    if dim.NumberOfSegments == 0:\n        segs = [(dim.Origin, dim.Value)]\n    else:\n        segs = [(s.Origin, s.Value) for s in dim.Segments]\n    pts = []\n    for origin, value in segs:\n        if value is None:\n            continue\n        half = d.Multiply(value / 2.0)\n        pts.append(origin.Subtract(half))\n        pts.append(origin.Add(half))\n    return pts\n\n\ndef witness_extension(dim, view):\n    \"\"\"Witness Line Extension of the dimension's type, in model units.\"\"\"\n    dtype = doc.GetElement(dim.GetTypeId())\n    p = None\n    try:\n        p = dtype.get_Parameter(BuiltInParameter.WITNS_LINE_EXTENSION)\n    except Exception:\n        pass\n    if p is None:\n        p = dtype.LookupParameter(\"Witness Line Extension\")\n    paper = p.AsDouble() if p is not None else 2.0 * MM\n    return paper * view.Scale\n\n\ndef find_line_style(name):\n    if not name:\n        return None\n    cat = doc.Settings.Categories.get_Item(BuiltInCategory.OST_Lines)\n    for sub in cat.SubCategories:\n        if sub.Name.strip().lower() == name.strip().lower():\n            return sub.GetGraphicsStyle(GraphicsStyleType.Projection)\n    return None\n\n\ndef group_parallel(dims):\n    \"\"\"Group dimensions by owner view and (anti)parallel direction.\"\"\"\n    groups = []\n    for dim in dims:\n        d = dim.Curve.Direction.Normalize()\n        for g in groups:\n            if (g[\"view\"] == dim.OwnerViewId.IntegerValue\n                    and abs(abs(g[\"dir\"].DotProduct(d)) - 1.0) < PARALLEL_TOL):\n                g[\"dims\"].append(dim)\n                break\n        else:\n            groups.append({\"view\": dim.OwnerViewId.IntegerValue,\n                           \"dir\": d, \"dims\": [dim]})\n    return groups\n\n\ndef existing_lines(view):\n    lines = []\n    for ce in FilteredElementCollector(doc, view.Id).OfClass(CurveElement):\n        c = ce.GeometryCurve\n        if c is not None and c.IsBound and isinstance(c, Line):\n            lines.append((c.GetEndPoint(0), c.GetEndPoint(1)))\n    return lines\n\n\ndef is_duplicate(p0, p1, lines):\n    for a, b in lines:\n        if ((a.IsAlmostEqualTo(p0, POS_TOL) and b.IsAlmostEqualTo(p1, POS_TOL)) or\n                (a.IsAlmostEqualTo(p1, POS_TOL) and b.IsAlmostEqualTo(p0, POS_TOL))):\n            return True\n    return False\n\n\ndef plan_connections(group, view):\n    \"\"\"Return [(p0, p1)] for every witness position shared by 2+ strings.\"\"\"\n    d = group[\"dir\"]\n    perp = view.ViewDirection.CrossProduct(d).Normalize()\n    base = group[\"dims\"][0].Curve.Origin\n\n    entries = []                      # (t along dims, s across dims, dim)\n    for dim in group[\"dims\"]:\n        s = dim.Curve.Origin.Subtract(base).DotProduct(perp)\n        ts = sorted(p.Subtract(base).DotProduct(d) for p in witness_points(dim))\n        last = None\n        for t in ts:\n            if last is None or t - last > POS_TOL:\n                entries.append((t, s, dim))\n            last = t\n    entries.sort(key=lambda e: e[0])\n\n    clusters, current = [], []\n    for e in entries:\n        if current and e[0] - current[-1][0] > POS_TOL:\n            clusters.append(current)\n            current = []\n        current.append(e)\n    if current:\n        clusters.append(current)\n\n    result = []\n    for cl in clusters:\n        if len(set(e[2].Id.IntegerValue for e in cl)) < 2:\n            continue\n        t = sum(e[0] for e in cl) / len(cl)\n        lo = min(cl, key=lambda e: e[1])\n        hi = max(cl, key=lambda e: e[1])\n        s0, s1 = lo[1], hi[1]\n        if s1 - s0 < POS_TOL:         # collinear strings, nothing to join\n            continue\n        if EXTEND:\n            s0 -= witness_extension(lo[2], view)\n            s1 += witness_extension(hi[2], view)\n        along = base.Add(d.Multiply(t))\n        result.append((along.Add(perp.Multiply(s0)), along.Add(perp.Multiply(s1))))\n    return result\n\n\nreport = []\ndims = pick_dimensions()\nif dims is None:\n    OUT = \"Cancelled - nothing changed.\"\nelif len(dims) < 2:\n    OUT = \"Pick at least two parallel dimension strings.\"\nelse:\n    style = find_line_style(LINE_STYLE)\n    if LINE_STYLE and style is None:\n        report.append(\"Line style '{0}' not found - default used.\".format(LINE_STYLE))\n    created = skipped = 0\n    TransactionManager.Instance.EnsureInTransaction(doc)\n    for g in group_parallel(dims):\n        if len(g[\"dims\"]) < 2:\n            continue\n        view = doc.GetElement(g[\"dims\"][0].OwnerViewId)\n        existing = existing_lines(view)\n        for p0, p1 in plan_connections(g, view):\n            if is_duplicate(p0, p1, existing):\n                skipped += 1\n                continue\n            curve = doc.Create.NewDetailCurve(view, Line.CreateBound(p0, p1))\n            if style is not None:\n                curve.LineStyle = style\n            existing.append((p0, p1))\n            created += 1\n    TransactionManager.Instance.TransactionTaskDone()\n    report.insert(0, \"{0} dimension(s) picked, {1} connecting line(s) created, \"\n                     \"{2} already existed.\".format(len(dims), created, skipped))\n    OUT = \"\\n\".join(report)\n",
       "Engine": "CPython3",
       "VariableInputPorts": true,
-      "Id": "1969116ba83f41209dd00774f1a92725",
+      "Id": "8a1e955363394a7a8a4d570a1c3debf7",
       "Inputs": [
         {
-          "Id": "a842e301640a43bfb6dc927d18105885",
+          "Id": "6b72ded6036d4619928222c6035afe2b",
           "Name": "IN[0]",
           "Description": "Input #0",
           "UsingDefaultValue": false,
@@ -92,7 +92,7 @@
           "KeepListStructure": false
         },
         {
-          "Id": "11215a18c4584623a9e2a37d8a3e7a4e",
+          "Id": "865f56e11def4c258a9bb8b002efb48b",
           "Name": "IN[1]",
           "Description": "Input #1",
           "UsingDefaultValue": false,
@@ -103,7 +103,7 @@
       ],
       "Outputs": [
         {
-          "Id": "24efc98bf6534dd0a1622a0ae21d37e7",
+          "Id": "6e7adfe7900940c992a15bc50535d610",
           "Name": "OUT",
           "Description": "Result of the python script",
           "UsingDefaultValue": false,
@@ -118,15 +118,15 @@
   ],
   "Connectors": [
     {
-      "Start": "f5ca34d3ab6b4e05aef3b12b34c1c0bb",
-      "End": "a842e301640a43bfb6dc927d18105885",
-      "Id": "8f431b425c164e2ea3c4eb41dbb53b3c",
+      "Start": "cd0d73003dda4f3a922848697f5b906a",
+      "End": "6b72ded6036d4619928222c6035afe2b",
+      "Id": "da8fc783d5884feaac611110efc7a560",
       "IsHidden": "False"
     },
     {
-      "Start": "2c7ff80a4b5d4c348283dd6f04e7610c",
-      "End": "11215a18c4584623a9e2a37d8a3e7a4e",
-      "Id": "80636bac4a3f42d09a51b56bd382b7ce",
+      "Start": "eb80016f35104d86a514b690c137d9f6",
+      "End": "865f56e11def4c258a9bb8b002efb48b",
+      "Id": "4c1a0f8c659b41b694fce49e965a6b41",
       "IsHidden": "False"
     }
   ],
@@ -156,7 +156,7 @@
     },
     "NodeViews": [
       {
-        "Id": "9f4045eda7be4f6b986802843ea20438",
+        "Id": "d56d4aa50b344ca48a6c3c6ae5ac92e9",
         "Name": "Line Style",
         "IsSetAsInput": true,
         "IsSetAsOutput": false,
@@ -166,7 +166,7 @@
         "Y": 0.0
       },
       {
-        "Id": "2fd2fe2e9ddc46f1b3eb77f56b81a167",
+        "Id": "6cd681f717404bc9a4f58bbfef3e375d",
         "Name": "Extend Past Outer Strings",
         "IsSetAsInput": true,
         "IsSetAsOutput": false,
@@ -176,7 +176,7 @@
         "Y": 130.0
       },
       {
-        "Id": "1969116ba83f41209dd00774f1a92725",
+        "Id": "8a1e955363394a7a8a4d570a1c3debf7",
         "Name": "Connect Aligned Dimensions",
         "IsSetAsInput": false,
         "IsSetAsOutput": true,

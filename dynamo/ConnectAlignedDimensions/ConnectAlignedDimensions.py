@@ -167,11 +167,11 @@ def plan_connections(group, view):
     """Return [(p0, p1)] for every witness position shared by 2+ strings."""
     d = group["dir"]
     perp = view.ViewDirection.CrossProduct(d).Normalize()
-    base = group["dims"][0].Origin
+    base = group["dims"][0].Curve.Origin
 
     entries = []                      # (t along dims, s across dims, dim)
     for dim in group["dims"]:
-        s = dim.Origin.Subtract(base).DotProduct(perp)
+        s = dim.Curve.Origin.Subtract(base).DotProduct(perp)
         ts = sorted(p.Subtract(base).DotProduct(d) for p in witness_points(dim))
         last = None
         for t in ts:
