@@ -21,7 +21,8 @@ Inputs
     IN[2]  Remove duplicate segments from the inner strings (bool).
     IN[3]  Only remove duplicates longer than this, in mm (number). The
            default 90 keeps 90 mm walls on every string but removes thicker
-           walls (e.g. 240) and rooms.
+           walls (e.g. 240) and rooms. Walls this short that are left with
+           no room either side after the removal are deleted as well.
 Output
     OUT    Report text.
 
@@ -278,8 +279,26 @@ def plan_duplicate_removal(group, view):
                     remove.add(idx)
                     break
         if remove:
+            remove |= stranded_walls(ivs, remove)
             removals.append((dim, remove))
     return removals
+
+
+def stranded_walls(ivs, remove):
+    """Segments left in a run of walls with no room either side.
+
+    After removal a string falls into runs of kept segments; a run made only
+    of short segments (walls no longer than MIN_DUPE_LEN) is dropped too.
+    """
+    stranded, run = set(), []
+    for a, b, idx in sorted(ivs, key=lambda iv: iv[2]) + [(0.0, 0.0, None)]:
+        if idx is None or idx in remove:
+            if run and all(rb - ra <= MIN_DUPE_LEN + POS_TOL for ra, rb, _ in run):
+                stranded.update(i for _, _, i in run)
+            run = []
+        else:
+            run.append((a, b, idx))
+    return stranded
 
 
 TEXT_PROPS = ("Above", "Below", "Prefix", "Suffix", "ValueOverride")
