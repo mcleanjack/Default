@@ -5,7 +5,8 @@ shares a witness line position with a string closer to the building, its
 witness lines are lengthened to reach that inner string. They stay part of the
 dimension and move with it.
 
-It can also tidy repeated segments:
+It can also space the strings evenly (600 mm apart by default) and tidy
+repeated segments:
 - When the same segment (for example 4180 LIVING) appears in more than one picked string, it is kept only in the string furthest from the building and removed from the others.
 - Repeated 90 mm walls stay on every string, but their number is hidden on the inner strings.
 
@@ -22,9 +23,17 @@ It can also tidy repeated segments:
 ## Inputs
 | Input | Default | Meaning |
 |---|---|---|
+| String Spacing (mm) | `600` | Moves the strings so each is this far (model size) from the one inside it. The string closest to the building stays put. 0 leaves them where they are. |
 | Extend Past Inner String | `true` | Witness lines run past the inner string by its type's *Witness Line Extension*. Off, they stop at the inner string. |
 | Remove Duplicate Segments | `true` | Removes repeated segments from strings closer to the building, and hides repeated 90 mm wall numbers. |
 | Remove Duplicates Longer Than (mm) | `90` | Repeats this long or shorter (90 mm walls) stay on every string. Thicker walls, such as 240, and rooms are removed. Set it to 0 to remove 90 mm walls too. A short wall left with no room either side after the removal is deleted as well. |
+
+## Order of steps
+1. Space the strings.
+2. Remove repeated segments and hide repeated 90 mm numbers.
+3. Lengthen the witness lines to reach the next string in.
+
+Strings at the same distance from the building (such as the pieces of a rebuilt string) count as one row and move together. Strings on opposite sides of the building are spaced separately. Pinned dimensions can't be moved; the report lists them.
 
 ## How the witness lines are lengthened
 Revit's API can't change the length of individual witness lines. The only control a script has is the dimension type's *Witness Line Control* setting. So:

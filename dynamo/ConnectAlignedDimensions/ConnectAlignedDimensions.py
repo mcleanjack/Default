@@ -24,6 +24,9 @@ Inputs
            walls (e.g. 240) and rooms. Walls this short that are left with
            no room either side after the removal are deleted as well, and
            the number on the rest is hidden where an outer string shows it.
+    IN[3]  Space the strings this far apart, in mm (number, model size).
+           The string closest to the building stays put; the others move
+           outward. 0 leaves the strings where they are.
 Output
     OUT    Report text.
 
@@ -37,8 +40,8 @@ clr.AddReference("RevitAPI")
 clr.AddReference("RevitAPIUI")
 clr.AddReference("RevitServices")
 from Autodesk.Revit.DB import (BuiltInParameter, Dimension, DimensionType,
-                               FilteredElementCollector, Line, Reference,
-                               ReferenceArray)
+                               ElementTransformUtils, FilteredElementCollector,
+                               Line, Reference, ReferenceArray)
 from Autodesk.Revit.Exceptions import OperationCanceledException
 from Autodesk.Revit.UI.Selection import ISelectionFilter, ObjectType
 from System.Collections.Generic import List
@@ -55,6 +58,7 @@ MM = 1.0 / 304.8            # Revit internal units are feet
 POS_TOL = 0.5 * MM          # witness lines closer than this count as aligned
 PARALLEL_TOL = 1e-6
 MIN_DUPE_LEN = (float(IN[2]) if len(IN) > 2 and IN[2] is not None else 90.0) * MM
+SPACING = (float(IN[3]) if len(IN) > 3 and IN[3] is not None else 600.0) * MM
 
 
 def as_linear_dim(el):
@@ -394,6 +398,49 @@ def fixed_witness_type(dtype, length):
     return new
 
 
+def space_strings(group, view):
+    """Move strings so each sits SPACING beyond the one inside it.
+
+    Strings at the same distance from the building (e.g. pieces of one
+    string) count as one row. Returns (rows moved, problems).
+    """
+    d = group["dir"]
+    perp = view.ViewDirection.CrossProduct(d).Normalize()
+    base = group["dims"][0].Curve.Origin
+    s_bld = building_side(group["dims"], view, base, perp)
+    if s_bld is None:
+        return 0, ["Couldn't tell which side the building is on - strings not spaced."]
+    moved, problems = 0, []
+    for side in (1.0, -1.0):
+        offs = []
+        for dim in group["dims"]:
+            off = dim.Curve.Origin.Subtract(base).DotProduct(perp) - s_bld
+            if off * side > 0:
+                offs.append((abs(off), dim))
+        offs.sort(key=lambda o: o[0])
+        rows = []
+        for off, dim in offs:
+            if rows and off - rows[-1][0] <= POS_TOL:
+                rows[-1][1].append(dim)
+            else:
+                rows.append((off, [dim]))
+        for k, (off, row) in enumerate(rows):
+            if k == 0:
+                continue
+            delta = rows[0][0] + k * SPACING - off
+            if abs(delta) <= POS_TOL:
+                continue
+            for dim in row:
+                try:
+                    ElementTransformUtils.MoveElement(
+                        doc, dim.Id, perp.Multiply(delta * side))
+                except Exception as ex:
+                    problems.append("Couldn't move dimension {0}: {1}"
+                                    .format(dim.Id.IntegerValue, ex))
+            moved += 1
+    return moved, problems
+
+
 def rearm_for_next_run():
     """Mark this node as modified so the next Run executes it again.
 
@@ -420,12 +467,18 @@ if dims is None:
 elif len(dims) < 2:
     OUT = "Pick at least two parallel dimension strings."
 else:
-    retyped = removed = hidden = 0
+    retyped = removed = hidden = spaced = 0
     TransactionManager.Instance.EnsureInTransaction(doc)
     for g in group_parallel(dims):
         if len(g["dims"]) < 2:
             continue
         view = doc.GetElement(g["dims"][0].OwnerViewId)
+        if SPACING > 0:
+            n, problems = space_strings(g, view)
+            spaced += n
+            report.extend(problems)
+            if n:
+                doc.Regenerate()
         # Remove duplicates first so witness lines only reach strings that
         # still share a witness line with them.
         if REMOVE_DUPES:
@@ -463,10 +516,11 @@ else:
                 report.append("Witness lines of dimension {0} not changed: {1}"
                               .format(dim.Id.IntegerValue, ex))
     TransactionManager.Instance.TransactionTaskDone()
-    report.insert(0, "{0} dimension(s) picked, {1} string(s) given longer "
-                     "witness lines, {2} duplicate segment(s) removed, "
-                     "{3} repeated wall value(s) hidden."
-                  .format(len(dims), retyped, removed, hidden))
+    report.insert(0, "{0} dimension(s) picked, {1} row(s) of strings moved, "
+                     "{2} string(s) given longer witness lines, "
+                     "{3} duplicate segment(s) removed, "
+                     "{4} repeated wall value(s) hidden."
+                  .format(len(dims), spaced, retyped, removed, hidden))
     OUT = "\n".join(report)
 
 rearm_for_next_run()
