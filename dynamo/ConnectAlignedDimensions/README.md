@@ -32,6 +32,7 @@ string furthest from the building and removed from the others.
 - The script only joins strings that point the same way and sit in the same view. You can pick horizontal and vertical strings together.
 - You can press Run again as many times as you like; each run brings the picker back. Running it again does not draw a second copy of a line that is already there.
 - Revit can't delete a segment from the middle of a string, so the script replaces the inner string with new strings either side of the removed segment. Above/Below text, prefixes, suffixes, value overrides and moved text are copied across. Other instance settings on the old string are not.
+- A 90 mm wall that is also shown on a string further out keeps its dimension and witness lines, but its number is hidden. Revit won't allow a blank override, so the number is replaced with an invisible character. To show it again, clear *Replace With Text* on that segment.
 - "Furthest from the building" is worked out from the elements the strings dimension.
 - The lines are ordinary detail lines, so they do not move with the dimensions.
 - The graph uses the CPython3 engine. If your Dynamo doesn't have that engine (for example, Revit 2025+ uses PythonNet3), pick the engine it has from the Python node's dropdown. The code works on IronPython2, CPython3 and PythonNet3.

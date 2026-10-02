@@ -22,7 +22,8 @@ Inputs
     IN[3]  Only remove duplicates longer than this, in mm (number). The
            default 90 keeps 90 mm walls on every string but removes thicker
            walls (e.g. 240) and rooms. Walls this short that are left with
-           no room either side after the removal are deleted as well.
+           no room either side after the removal are deleted as well, and
+           the number on the rest is hidden where an outer string shows it.
 Output
     OUT    Report text.
 
@@ -252,8 +253,10 @@ def building_side(dims, view, base, perp):
     return sum(vals) / len(vals) if vals else None
 
 
-def plan_duplicate_removal(group, view):
-    """[(dim, set(segment indices))] to remove, keeping the outermost copy."""
+def outer_duplicates(group, view):
+    """[(dim, intervals, dup)]: dup holds the indices of dim's segments that
+    also appear in a string further from the building. None if the building
+    side can't be found."""
     d = group["dir"]
     perp = view.ViewDirection.CrossProduct(d).Normalize()
     base = group["dims"][0].Curve.Origin
@@ -265,23 +268,61 @@ def plan_duplicate_removal(group, view):
         s = dim.Curve.Origin.Subtract(base).DotProduct(perp)
         info.append((dim, abs(s - s_bld), segment_intervals(dim, base, d)))
 
-    removals = []
+    result = []
     for dim, dist, ivs in info:
-        remove = set()
+        dup = set()
         for a, b, idx in ivs:
-            if b - a <= MIN_DUPE_LEN + POS_TOL:
-                continue
             for dim2, dist2, ivs2 in info:
                 if dist2 <= dist + POS_TOL:
                     continue          # only defer to strings further out
                 if any(abs(a - a2) <= POS_TOL and abs(b - b2) <= POS_TOL
                        for a2, b2, _ in ivs2):
-                    remove.add(idx)
+                    dup.add(idx)
                     break
+        result.append((dim, ivs, dup))
+    return result
+
+
+def is_wall(a, b):
+    return b - a <= MIN_DUPE_LEN + POS_TOL
+
+
+def plan_duplicate_removal(group, view):
+    """[(dim, set(segment indices))] to remove, keeping the outermost copy."""
+    info = outer_duplicates(group, view)
+    if info is None:
+        return None
+    removals = []
+    for dim, ivs, dup in info:
+        remove = set(idx for a, b, idx in ivs if idx in dup and not is_wall(a, b))
         if remove:
             remove |= stranded_walls(ivs, remove)
             removals.append((dim, remove))
     return removals
+
+
+def plan_hidden_values(group, view):
+    """Segments (walls repeated further out) whose number should be hidden."""
+    info = outer_duplicates(group, view) or []
+    hide = []
+    for dim, ivs, dup in info:
+        segs = [dim] if dim.NumberOfSegments == 0 else list(dim.Segments)
+        hide.extend(segs[idx] for a, b, idx in ivs if idx in dup and is_wall(a, b))
+    return hide
+
+
+# Revit won't accept a blank override; these print as nothing.
+HIDDEN_TEXT = (u"\u200e", u"\u200b", u"\u00a0")
+
+
+def hide_value(seg):
+    for text in HIDDEN_TEXT:
+        try:
+            seg.ValueOverride = text
+            return True
+        except Exception:
+            pass
+    return False
 
 
 def stranded_walls(ivs, remove):
@@ -293,7 +334,7 @@ def stranded_walls(ivs, remove):
     stranded, run = set(), []
     for a, b, idx in sorted(ivs, key=lambda iv: iv[2]) + [(0.0, 0.0, None)]:
         if idx is None or idx in remove:
-            if run and all(rb - ra <= MIN_DUPE_LEN + POS_TOL for ra, rb, _ in run):
+            if run and all(is_wall(ra, rb) for ra, rb, _ in run):
                 stranded.update(i for _, _, i in run)
             run = []
         else:
@@ -385,7 +426,7 @@ else:
     style = find_line_style(LINE_STYLE)
     if LINE_STYLE and style is None:
         report.append("Line style '{0}' not found - default used.".format(LINE_STYLE))
-    created = skipped = removed = 0
+    created = skipped = removed = hidden = 0
     TransactionManager.Instance.EnsureInTransaction(doc)
     for g in group_parallel(dims):
         if len(g["dims"]) < 2:
@@ -411,6 +452,9 @@ else:
                 g["dims"] = others + new_dims
             if plan:
                 doc.Regenerate()
+            for seg in plan_hidden_values(g, view):
+                if hide_value(seg):
+                    hidden += 1
         existing = existing_lines(view)
         for p0, p1 in plan_connections(g, view):
             if is_duplicate(p0, p1, existing):
@@ -423,8 +467,9 @@ else:
             created += 1
     TransactionManager.Instance.TransactionTaskDone()
     report.insert(0, "{0} dimension(s) picked, {1} connecting line(s) created, "
-                     "{2} already existed, {3} duplicate segment(s) removed."
-                  .format(len(dims), created, skipped, removed))
+                     "{2} already existed, {3} duplicate segment(s) removed, "
+                     "{4} repeated wall value(s) hidden."
+                  .format(len(dims), created, skipped, removed, hidden))
     OUT = "\n".join(report)
 
 rearm_for_next_run()
