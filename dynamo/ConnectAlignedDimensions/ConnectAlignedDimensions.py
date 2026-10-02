@@ -301,11 +301,14 @@ def copy_segment_text(src, dst):
 
 
 def rebuild_without(dim, remove, view):
-    """Replace dim by one string per run of kept segments. Returns success."""
+    """Replace dim by one string per run of kept segments.
+
+    Returns the new dimensions, or None if dim could not be rebuilt.
+    """
     refs = list(dim.References)
     segs = [dim] if dim.NumberOfSegments == 0 else list(dim.Segments)
     if len(refs) != len(segs) + 1:
-        return False
+        return None
     runs, cur = [], []
     for i in range(len(segs)):
         if i in remove:
@@ -320,6 +323,7 @@ def rebuild_without(dim, remove, view):
     d = dim.Curve.Direction.Normalize()
     o = dim.Curve.Origin
     line = Line.CreateBound(o.Subtract(d.Multiply(100.0)), o.Add(d.Multiply(100.0)))
+    created = []
     for run in runs:
         ra = ReferenceArray()
         for k in range(run[0], run[-1] + 2):
@@ -328,8 +332,9 @@ def rebuild_without(dim, remove, view):
         new_segs = [new] if new.NumberOfSegments == 0 else list(new.Segments)
         for src, dst in zip([segs[i] for i in run], new_segs):
             copy_segment_text(src, dst)
+        created.append(new)
     doc.Delete(dim.Id)
-    return True
+    return created
 
 
 def rearm_for_next_run():
@@ -367,6 +372,24 @@ else:
         if len(g["dims"]) < 2:
             continue
         view = doc.GetElement(g["dims"][0].OwnerViewId)
+        # Remove duplicates first so lines only join witness lines that remain.
+        if REMOVE_DUPES:
+            plan = plan_duplicate_removal(g, view)
+            if plan is None:
+                report.append("Couldn't tell which side the building is on - "
+                              "no duplicate segments removed.")
+                plan = []
+            for dim, remove in plan:
+                new_dims = rebuild_without(dim, remove, view)
+                if new_dims is None:
+                    report.append("Couldn't rebuild dimension {0} - left as is."
+                                  .format(dim.Id.IntegerValue))
+                    continue
+                removed += len(remove)
+                g["dims"] = [x for x in g["dims"]
+                             if x.Id.IntegerValue != dim.Id.IntegerValue] + new_dims
+            if plan:
+                doc.Regenerate()
         existing = existing_lines(view)
         for p0, p1 in plan_connections(g, view):
             if is_duplicate(p0, p1, existing):
@@ -377,18 +400,6 @@ else:
                 curve.LineStyle = style
             existing.append((p0, p1))
             created += 1
-        if REMOVE_DUPES:
-            plan = plan_duplicate_removal(g, view)
-            if plan is None:
-                report.append("Couldn't tell which side the building is on - "
-                              "no duplicate segments removed.")
-                continue
-            for dim, remove in plan:
-                if rebuild_without(dim, remove, view):
-                    removed += len(remove)
-                else:
-                    report.append("Couldn't rebuild dimension {0} - left as is."
-                                  .format(dim.Id.IntegerValue))
     TransactionManager.Instance.TransactionTaskDone()
     report.insert(0, "{0} dimension(s) picked, {1} connecting line(s) created, "
                      "{2} already existed, {3} duplicate segment(s) removed."
