@@ -51,7 +51,7 @@ from RevitServices.Transactions import TransactionManager
 doc = DocumentManager.Instance.CurrentDBDocument
 uidoc = DocumentManager.Instance.CurrentUIApplication.ActiveUIDocument
 
-EXTEND = bool(IN[0]) if len(IN) > 0 and IN[0] is not None else True
+EXTEND = bool(IN[0]) if len(IN) > 0 and IN[0] is not None else False
 REMOVE_DUPES = bool(IN[1]) if len(IN) > 1 and IN[1] is not None else True
 
 MM = 1.0 / 304.8            # Revit internal units are feet
@@ -361,7 +361,8 @@ def plan_witness_lengths(group, view):
     return result
 
 
-TYPE_SUFFIX = re.compile(r" - [0-9.]+mm Witness$")
+# Matches the suffix added by this script (current and older names).
+TYPE_SUFFIX = re.compile(r" - [0-9.]+(mm)? Witness( @1:[0-9]+)?$")
 
 
 def set_fixed_witness_control(dtype):
@@ -379,10 +380,15 @@ def set_fixed_witness_control(dtype):
     return False
 
 
-def fixed_witness_type(dtype, length):
-    """Copy of dtype whose witness lines are fixed at length (paper feet)."""
+def fixed_witness_type(dtype, length, scale):
+    """Copy of dtype whose witness lines are fixed at length (paper feet).
+
+    Named after the model length at the view scale, e.g.
+    "Standard Dimension - 600 Witness @1:100".
+    """
     base_name = TYPE_SUFFIX.sub("", dtype.Name)
-    name = "{0} - {1:g}mm Witness".format(base_name, round(length / MM, 1))
+    name = "{0} - {1:g} Witness @1:{2}".format(
+        base_name, round(length * scale / MM, 1), scale)
     for t in FilteredElementCollector(doc).OfClass(DimensionType):
         if t.Name == name:
             return t
@@ -510,7 +516,7 @@ else:
             continue
         for dim, length in lengths:
             try:
-                dim.ChangeTypeId(fixed_witness_type(dim.DimensionType, length).Id)
+                dim.ChangeTypeId(fixed_witness_type(dim.DimensionType, length, view.Scale).Id)
                 retyped += 1
             except Exception as ex:
                 report.append("Witness lines of dimension {0} not changed: {1}"

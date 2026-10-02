@@ -24,7 +24,7 @@ repeated segments:
 | Input | Default | Meaning |
 |---|---|---|
 | String Spacing (mm) | `600` | Moves the strings so each is this far (model size) from the one inside it. The string closest to the building stays put. 0 leaves them where they are. |
-| Extend Past Inner String | `true` | Witness lines run past the inner string by its type's *Witness Line Extension*. Off, they stop at the inner string. |
+| Extend Past Inner String | `false` | Off, witness lines are exactly as long as the spacing (600 mm), so they stop at the inner string. On, they run past it by the type's *Witness Line Extension*. |
 | Remove Duplicate Segments | `true` | Removes repeated segments from strings closer to the building, and hides repeated 90 mm wall numbers. |
 | Remove Duplicates Longer Than (mm) | `90` | Repeats this long or shorter (90 mm walls) stay on every string. Thicker walls, such as 240, and rooms are removed. Set it to 0 to remove 90 mm walls too. A short wall left with no room either side after the removal is deleted as well. |
 
@@ -37,7 +37,7 @@ Strings at the same distance from the building (such as the pieces of a rebuilt 
 
 ## How the witness lines are lengthened
 Revit's API can't change the length of individual witness lines. The only control a script has is the dimension type's *Witness Line Control* setting. So:
-- Each outer string is given a copy of its dimension type, named like `Linear - 2.5mm Arial - 6mm Witness`. The copy is set to *Fixed to Dimension Line*, with a *Witness Line Length* that reaches the next string in.
+- Each outer string is given a copy of its dimension type, named after the model length and view scale, like `Standard Dimension - 600 Witness @1:100`. The copy is set to *Fixed to Dimension Line*, with a *Witness Line Length* that reaches the next string in.
 - **Every** witness line on that outer string gets that length, including ones with no matching witness line on the inner string.
 - Strings with the same type and spacing share one copied type. Running the script again reuses it.
 - The length is worked out from the view scale, so the strings will no longer touch if you change the view scale or move a string. Run the script again to update.
