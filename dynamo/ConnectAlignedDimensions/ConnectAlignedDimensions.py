@@ -380,14 +380,15 @@ else:
                               "no duplicate segments removed.")
                 plan = []
             for dim, remove in plan:
+                old_id = dim.Id.IntegerValue  # read now; dim is deleted below
                 new_dims = rebuild_without(dim, remove, view)
                 if new_dims is None:
                     report.append("Couldn't rebuild dimension {0} - left as is."
-                                  .format(dim.Id.IntegerValue))
+                                  .format(old_id))
                     continue
                 removed += len(remove)
                 g["dims"] = [x for x in g["dims"]
-                             if x.Id.IntegerValue != dim.Id.IntegerValue] + new_dims
+                             if x.Id.IntegerValue != old_id] + new_dims
             if plan:
                 doc.Regenerate()
         existing = existing_lines(view)
