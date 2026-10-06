@@ -1,6 +1,7 @@
 # Connect Aligned Dimensions (Dynamo for Revit)
 
 Tidies parallel dimension strings:
+- Unticks **Leader** on every picked string, and on any string the script rebuilds.
 - Spaces the strings evenly, 600 mm apart by default.
 - When the same segment (for example 4180 LIVING) appears in more than one picked string, keeps it only in the string furthest from the building and removes it from the others.
 - Repeated 90 mm walls stay on every string, but their number is hidden on the inner strings.
@@ -25,8 +26,9 @@ The script does not connect the strings' witness lines. Revit's API can't length
 | String Spacing (mm) | `600` | Moves the strings so each is this far (model size) from the one inside it. The string closest to the building stays put. 0 leaves them where they are. |
 
 ## Order of steps
-1. Space the strings.
-2. Remove repeated segments and hide repeated 90 mm numbers.
+1. Untick Leader on the picked strings.
+2. Space the strings.
+3. Remove repeated segments and hide repeated 90 mm numbers.
 
 Strings at the same distance from the building (such as the pieces of a rebuilt string) count as one row and move together. Strings on opposite sides of the building are spaced separately. Pinned dimensions can't be moved; the report lists them.
 

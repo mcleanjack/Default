@@ -1,5 +1,5 @@
 {
-  "Uuid": "3442b098-5819-4634-98d5-579268eef996",
+  "Uuid": "44c77c9b-206f-42ad-a182-54b82d1d1fbc",
   "IsCustomNode": false,
   "Description": "Pick parallel dimension strings and click Finish: strings are spaced apart, segments repeated in an outer string are removed from the inner one, and repeated 90 mm walls have their value hidden.",
   "Name": "ConnectAlignedDimensions",
@@ -8,7 +8,7 @@
   },
   "Inputs": [
     {
-      "Id": "68a8264091e04d7a9d87d34eb544b668",
+      "Id": "1ca13ac546b046268f76b5e4107f4964",
       "Name": "Remove Duplicate Segments",
       "Type": "boolean",
       "Type2": "boolean",
@@ -16,7 +16,7 @@
       "Description": "Remove segments repeated in a string further from the building."
     },
     {
-      "Id": "e9394c49949c4158903ae8957b1eedd7",
+      "Id": "1448682c28064a39b17f40795463ee3d",
       "Name": "Remove Duplicates Longer Than (mm)",
       "Type": "number",
       "Type2": "number",
@@ -24,7 +24,7 @@
       "Description": "Duplicates this long or shorter (e.g. 90 mm walls) are kept on every string."
     },
     {
-      "Id": "d0dc1573d99a40b1b1a52ef20f93e43a",
+      "Id": "309272b0677a4b56bb6a65e5e2236129",
       "Name": "String Spacing (mm)",
       "Type": "number",
       "Type2": "number",
@@ -34,7 +34,7 @@
   ],
   "Outputs": [
     {
-      "Id": "c4bb82b7b2d545388fa20cb299b05b4c",
+      "Id": "ce6d537466d24a1a8c17dccd9d41dc20",
       "Name": "Connect Aligned Dimensions",
       "Type": "unknown",
       "InitialValue": "",
@@ -46,11 +46,11 @@
       "ConcreteType": "CoreNodeModels.Input.BoolSelector, CoreNodeModels",
       "NodeType": "BooleanInputNode",
       "InputValue": true,
-      "Id": "68a8264091e04d7a9d87d34eb544b668",
+      "Id": "1ca13ac546b046268f76b5e4107f4964",
       "Inputs": [],
       "Outputs": [
         {
-          "Id": "1d71f8ef23d842d0baa6b2f57b331aed",
+          "Id": "18203a462db84180b85d863e6a762788",
           "Name": "",
           "Description": "Boolean",
           "UsingDefaultValue": false,
@@ -67,11 +67,11 @@
       "NodeType": "NumberInputNode",
       "NumberType": "Double",
       "InputValue": 90.0,
-      "Id": "e9394c49949c4158903ae8957b1eedd7",
+      "Id": "1448682c28064a39b17f40795463ee3d",
       "Inputs": [],
       "Outputs": [
         {
-          "Id": "42d7df89a7514713996ccf92e43526cd",
+          "Id": "2ec234f99ada4c19b12d9551f1d854af",
           "Name": "",
           "Description": "Double",
           "UsingDefaultValue": false,
@@ -88,11 +88,11 @@
       "NodeType": "NumberInputNode",
       "NumberType": "Double",
       "InputValue": 600.0,
-      "Id": "d0dc1573d99a40b1b1a52ef20f93e43a",
+      "Id": "309272b0677a4b56bb6a65e5e2236129",
       "Inputs": [],
       "Outputs": [
         {
-          "Id": "ca50e67536ef407f84b055ac35311f27",
+          "Id": "30262efa3fcb4aa3a766b8fb0e2f1a0f",
           "Name": "",
           "Description": "Double",
           "UsingDefaultValue": false,
@@ -107,13 +107,13 @@
     {
       "ConcreteType": "PythonNodeModels.PythonNode, PythonNodeModels",
       "NodeType": "PythonScriptNode",
-      "Code": "\"\"\"\nConnect Aligned Dimensions  (Dynamo Python node for Revit)\n\nPick the parallel dimension strings you want to tidy, then press Finish on\nthe Options Bar. The strings are spaced a set distance apart, moving outward\nfrom the one closest to the building.\n\nWhen the same segment (same start and end witness lines) appears\nin more than one picked string, it is removed from every string except the\none furthest from the building. Revit cannot delete a segment from the middle\nof a string, so the inner string is rebuilt as separate strings either side of\nthe removed segment, keeping each segment's text overrides.\n\nInputs\n    IN[0]  Remove duplicate segments from the inner strings (bool).\n    IN[1]  Only remove duplicates longer than this, in mm (number). The\n           default 90 keeps 90 mm walls on every string but removes thicker\n           walls (e.g. 240) and rooms. Walls this short that are left with\n           no room either side after the removal are deleted as well, and\n           the number on the rest is hidden where an outer string shows it.\n    IN[2]  Space the strings this far apart, in mm (number, model size).\n           The string closest to the building stays put; the others move\n           outward. 0 leaves the strings where they are.\nOutput\n    OUT    Report text.\n\nWorks with IronPython 2.7, CPython3 and PythonNet3 engines.\n\"\"\"\nimport clr\nimport uuid\n\nclr.AddReference(\"RevitAPI\")\nclr.AddReference(\"RevitAPIUI\")\nclr.AddReference(\"RevitServices\")\nfrom Autodesk.Revit.DB import (Dimension, ElementTransformUtils, Line,\n                               Reference, ReferenceArray)\nfrom Autodesk.Revit.Exceptions import OperationCanceledException\nfrom Autodesk.Revit.UI.Selection import ISelectionFilter, ObjectType\nfrom System.Collections.Generic import List\nfrom RevitServices.Persistence import DocumentManager\nfrom RevitServices.Transactions import TransactionManager\n\ndoc = DocumentManager.Instance.CurrentDBDocument\nuidoc = DocumentManager.Instance.CurrentUIApplication.ActiveUIDocument\n\nREMOVE_DUPES = bool(IN[0]) if len(IN) > 0 and IN[0] is not None else True\n\nMM = 1.0 / 304.8            # Revit internal units are feet\nPOS_TOL = 0.5 * MM          # witness lines closer than this count as aligned\nPARALLEL_TOL = 1e-6\nMIN_DUPE_LEN = (float(IN[1]) if len(IN) > 1 and IN[1] is not None else 90.0) * MM\nSPACING = (float(IN[2]) if len(IN) > 2 and IN[2] is not None else 600.0) * MM\n\n\ndef as_linear_dim(el):\n    \"\"\"Return el if it is a straight (linear/aligned) dimension, else None.\"\"\"\n    if el is None or not isinstance(el, Dimension):\n        return None\n    try:\n        crv = el.Curve\n    except Exception:       # spot dimensions etc. have no curve\n        return None\n    if crv is None or not isinstance(crv, Line):\n        return None\n    return el\n\n\nclass DimensionFilter(ISelectionFilter):\n    # PythonNet needs a unique namespace per run; IronPython ignores it.\n    __namespace__ = \"ConnectAlignedDims_\" + uuid.uuid4().hex\n\n    def AllowElement(self, element):\n        return as_linear_dim(element) is not None\n\n    def AllowReference(self, reference, position):\n        return False\n\n\ndef pick_dimensions():\n    \"\"\"Let the user pick dimensions; anything already selected is pre-picked.\"\"\"\n    pre = List[Reference]()\n    for eid in uidoc.Selection.GetElementIds():\n        el = as_linear_dim(doc.GetElement(eid))\n        if el is not None:\n            pre.Add(Reference(el))\n    prompt = \"Pick the dimension strings to connect, then click Finish\"\n    try:\n        refs = uidoc.Selection.PickObjects(ObjectType.Element, DimensionFilter(),\n                                           prompt, pre)\n    except OperationCanceledException:\n        return None\n    dims, seen = [], set()\n    for r in refs:\n        el = as_linear_dim(doc.GetElement(r.ElementId))\n        if el is not None and el.Id.IntegerValue not in seen:\n            seen.add(el.Id.IntegerValue)\n            dims.append(el)\n    return dims\n\n\ndef group_parallel(dims):\n    \"\"\"Group dimensions by owner view and (anti)parallel direction.\"\"\"\n    groups = []\n    for dim in dims:\n        d = dim.Curve.Direction.Normalize()\n        for g in groups:\n            if (g[\"view\"] == dim.OwnerViewId.IntegerValue\n                    and abs(abs(g[\"dir\"].DotProduct(d)) - 1.0) < PARALLEL_TOL):\n                g[\"dims\"].append(dim)\n                break\n        else:\n            groups.append({\"view\": dim.OwnerViewId.IntegerValue,\n                           \"dir\": d, \"dims\": [dim]})\n    return groups\n\n\ndef segment_intervals(dim, base, d):\n    \"\"\"[(t_start, t_end, segment_index)] along d for each segment.\"\"\"\n    if dim.NumberOfSegments == 0:\n        segs = [(dim.Origin, dim.Value)]\n    else:\n        segs = [(s.Origin, s.Value) for s in dim.Segments]\n    result = []\n    for i, (origin, value) in enumerate(segs):\n        if value is None:\n            continue\n        t = origin.Subtract(base).DotProduct(d)\n        result.append((t - value / 2.0, t + value / 2.0, i))\n    return result\n\n\ndef building_side(dims, view, base, perp):\n    \"\"\"Average position (across the strings) of the dimensioned elements.\"\"\"\n    vals = []\n    for dim in dims:\n        for r in dim.References:\n            el = doc.GetElement(r.ElementId)\n            if el is None:\n                continue\n            bb = el.get_BoundingBox(view) or el.get_BoundingBox(None)\n            if bb is None:\n                continue\n            centre = bb.Min.Add(bb.Max).Multiply(0.5)\n            vals.append(centre.Subtract(base).DotProduct(perp))\n    return sum(vals) / len(vals) if vals else None\n\n\ndef outer_duplicates(group, view):\n    \"\"\"[(dim, intervals, dup)]: dup holds the indices of dim's segments that\n    also appear in a string further from the building. None if the building\n    side can't be found.\"\"\"\n    d = group[\"dir\"]\n    perp = view.ViewDirection.CrossProduct(d).Normalize()\n    base = group[\"dims\"][0].Curve.Origin\n    s_bld = building_side(group[\"dims\"], view, base, perp)\n    if s_bld is None:\n        return None\n    info = []\n    for dim in group[\"dims\"]:\n        s = dim.Curve.Origin.Subtract(base).DotProduct(perp)\n        info.append((dim, abs(s - s_bld), segment_intervals(dim, base, d)))\n\n    result = []\n    for dim, dist, ivs in info:\n        dup = set()\n        for a, b, idx in ivs:\n            for dim2, dist2, ivs2 in info:\n                if dist2 <= dist + POS_TOL:\n                    continue          # only defer to strings further out\n                if any(abs(a - a2) <= POS_TOL and abs(b - b2) <= POS_TOL\n                       for a2, b2, _ in ivs2):\n                    dup.add(idx)\n                    break\n        result.append((dim, ivs, dup))\n    return result\n\n\ndef is_wall(a, b):\n    return b - a <= MIN_DUPE_LEN + POS_TOL\n\n\ndef plan_duplicate_removal(group, view):\n    \"\"\"[(dim, set(segment indices))] to remove, keeping the outermost copy.\"\"\"\n    info = outer_duplicates(group, view)\n    if info is None:\n        return None\n    removals = []\n    for dim, ivs, dup in info:\n        remove = set(idx for a, b, idx in ivs if idx in dup and not is_wall(a, b))\n        if remove:\n            remove |= stranded_walls(ivs, remove)\n            removals.append((dim, remove))\n    return removals\n\n\ndef plan_hidden_values(group, view):\n    \"\"\"Segments (walls repeated further out) whose number should be hidden.\"\"\"\n    info = outer_duplicates(group, view) or []\n    hide = []\n    for dim, ivs, dup in info:\n        segs = [dim] if dim.NumberOfSegments == 0 else list(dim.Segments)\n        hide.extend(segs[idx] for a, b, idx in ivs if idx in dup and is_wall(a, b))\n    return hide\n\n\n# Revit won't accept a blank override; these print as nothing.\nHIDDEN_TEXT = (u\"\\u200e\", u\"\\u200b\", u\"\\u00a0\")\n\n\ndef hide_value(seg):\n    for text in HIDDEN_TEXT:\n        try:\n            seg.ValueOverride = text\n            return True\n        except Exception:\n            pass\n    return False\n\n\ndef stranded_walls(ivs, remove):\n    \"\"\"Segments left in a run of walls with no room either side.\n\n    After removal a string falls into runs of kept segments; a run made only\n    of short segments (walls no longer than MIN_DUPE_LEN) is dropped too.\n    \"\"\"\n    stranded, run = set(), []\n    for a, b, idx in sorted(ivs, key=lambda iv: iv[2]) + [(0.0, 0.0, None)]:\n        if idx is None or idx in remove:\n            if run and all(is_wall(ra, rb) for ra, rb, _ in run):\n                stranded.update(i for _, _, i in run)\n            run = []\n        else:\n            run.append((a, b, idx))\n    return stranded\n\n\nTEXT_PROPS = (\"Above\", \"Below\", \"Prefix\", \"Suffix\", \"ValueOverride\")\n\n\ndef copy_segment_text(src, dst):\n    for prop in TEXT_PROPS:\n        try:\n            val = getattr(src, prop)\n            if val:\n                setattr(dst, prop, val)\n        except Exception:\n            pass\n    try:\n        if src.IsTextPositionAdjustable():\n            dst.TextPosition = src.TextPosition\n    except Exception:\n        pass\n\n\ndef rebuild_without(dim, remove, view):\n    \"\"\"Replace dim by one string per run of kept segments.\n\n    Returns the new dimensions, or None if dim could not be rebuilt.\n    \"\"\"\n    refs = list(dim.References)\n    segs = [dim] if dim.NumberOfSegments == 0 else list(dim.Segments)\n    if len(refs) != len(segs) + 1:\n        return None\n    runs, cur = [], []\n    for i in range(len(segs)):\n        if i in remove:\n            if cur:\n                runs.append(cur)\n            cur = []\n        else:\n            cur.append(i)\n    if cur:\n        runs.append(cur)\n\n    d = dim.Curve.Direction.Normalize()\n    o = dim.Curve.Origin\n    line = Line.CreateBound(o.Subtract(d.Multiply(100.0)), o.Add(d.Multiply(100.0)))\n    created = []\n    for run in runs:\n        ra = ReferenceArray()\n        for k in range(run[0], run[-1] + 2):\n            ra.Append(refs[k])\n        new = doc.Create.NewDimension(view, line, ra, dim.DimensionType)\n        new_segs = [new] if new.NumberOfSegments == 0 else list(new.Segments)\n        for src, dst in zip([segs[i] for i in run], new_segs):\n            copy_segment_text(src, dst)\n        created.append(new)\n    doc.Delete(dim.Id)\n    return created\n\n\ndef space_strings(group, view):\n    \"\"\"Move strings so each sits SPACING beyond the one inside it.\n\n    Strings at the same distance from the building (e.g. pieces of one\n    string) count as one row. Returns (rows moved, problems).\n    \"\"\"\n    d = group[\"dir\"]\n    perp = view.ViewDirection.CrossProduct(d).Normalize()\n    base = group[\"dims\"][0].Curve.Origin\n    s_bld = building_side(group[\"dims\"], view, base, perp)\n    if s_bld is None:\n        return 0, [\"Couldn't tell which side the building is on - strings not spaced.\"]\n    moved, problems = 0, []\n    for side in (1.0, -1.0):\n        offs = []\n        for dim in group[\"dims\"]:\n            off = dim.Curve.Origin.Subtract(base).DotProduct(perp) - s_bld\n            if off * side > 0:\n                offs.append((abs(off), dim))\n        offs.sort(key=lambda o: o[0])\n        rows = []\n        for off, dim in offs:\n            if rows and off - rows[-1][0] <= POS_TOL:\n                rows[-1][1].append(dim)\n            else:\n                rows.append((off, [dim]))\n        for k, (off, row) in enumerate(rows):\n            if k == 0:\n                continue\n            delta = rows[0][0] + k * SPACING - off\n            if abs(delta) <= POS_TOL:\n                continue\n            for dim in row:\n                try:\n                    ElementTransformUtils.MoveElement(\n                        doc, dim.Id, perp.Multiply(delta * side))\n                except Exception as ex:\n                    problems.append(\"Couldn't move dimension {0}: {1}\"\n                                    .format(dim.Id.IntegerValue, ex))\n            moved += 1\n    return moved, problems\n\n\ndef rearm_for_next_run():\n    \"\"\"Mark this node as modified so the next Run executes it again.\n\n    Dynamo skips nodes whose inputs have not changed, which would stop the\n    picker from appearing a second time.\n    \"\"\"\n    try:\n        clr.AddReference(\"DynamoRevitDS\")\n        import Dynamo\n        ws = Dynamo.Applications.DynamoRevit.RevitDynamoModel.CurrentWorkspace\n        for node in ws.Nodes:\n            if getattr(node, \"Script\", None) and RERUN_MARKER in node.Script:\n                node.MarkNodeAsModified(True)\n    except Exception:\n        pass\n\n\nRERUN_MARKER = \"ConnectAlignedDims_rerun_marker\"\n\nreport = []\ndims = pick_dimensions()\nif dims is None:\n    OUT = \"Cancelled - nothing changed.\"\nelif len(dims) < 2:\n    OUT = \"Pick at least two parallel dimension strings.\"\nelse:\n    removed = hidden = spaced = 0\n    TransactionManager.Instance.EnsureInTransaction(doc)\n    for g in group_parallel(dims):\n        if len(g[\"dims\"]) < 2:\n            continue\n        view = doc.GetElement(g[\"dims\"][0].OwnerViewId)\n        if SPACING > 0:\n            n, problems = space_strings(g, view)\n            spaced += n\n            report.extend(problems)\n            if n:\n                doc.Regenerate()\n        if REMOVE_DUPES:\n            plan = plan_duplicate_removal(g, view)\n            if plan is None:\n                report.append(\"Couldn't tell which side the building is on - \"\n                              \"no duplicate segments removed.\")\n                plan = []\n            for dim, remove in plan:\n                # Read Ids now: touching dim after it is deleted throws.\n                old_id = dim.Id.IntegerValue\n                others = [x for x in g[\"dims\"] if x.Id.IntegerValue != old_id]\n                new_dims = rebuild_without(dim, remove, view)\n                if new_dims is None:\n                    report.append(\"Couldn't rebuild dimension {0} - left as is.\"\n                                  .format(old_id))\n                    continue\n                removed += len(remove)\n                g[\"dims\"] = others + new_dims\n            if plan:\n                doc.Regenerate()\n            for seg in plan_hidden_values(g, view):\n                if hide_value(seg):\n                    hidden += 1\n    TransactionManager.Instance.TransactionTaskDone()\n    report.insert(0, \"{0} dimension(s) picked, {1} row(s) of strings moved, \"\n                     \"{2} duplicate segment(s) removed, \"\n                     \"{3} repeated wall value(s) hidden.\"\n                  .format(len(dims), spaced, removed, hidden))\n    OUT = \"\\n\".join(report)\n\nrearm_for_next_run()\n",
+      "Code": "\"\"\"\nConnect Aligned Dimensions  (Dynamo Python node for Revit)\n\nPick the parallel dimension strings you want to tidy, then press Finish on\nthe Options Bar. The strings are spaced a set distance apart, moving outward\nfrom the one closest to the building. The Leader box is unticked on every\npicked string (and on any string the script rebuilds).\n\nWhen the same segment (same start and end witness lines) appears\nin more than one picked string, it is removed from every string except the\none furthest from the building. Revit cannot delete a segment from the middle\nof a string, so the inner string is rebuilt as separate strings either side of\nthe removed segment, keeping each segment's text overrides.\n\nInputs\n    IN[0]  Remove duplicate segments from the inner strings (bool).\n    IN[1]  Only remove duplicates longer than this, in mm (number). The\n           default 90 keeps 90 mm walls on every string but removes thicker\n           walls (e.g. 240) and rooms. Walls this short that are left with\n           no room either side after the removal are deleted as well, and\n           the number on the rest is hidden where an outer string shows it.\n    IN[2]  Space the strings this far apart, in mm (number, model size).\n           The string closest to the building stays put; the others move\n           outward. 0 leaves the strings where they are.\nOutput\n    OUT    Report text.\n\nWorks with IronPython 2.7, CPython3 and PythonNet3 engines.\n\"\"\"\nimport clr\nimport uuid\n\nclr.AddReference(\"RevitAPI\")\nclr.AddReference(\"RevitAPIUI\")\nclr.AddReference(\"RevitServices\")\nfrom Autodesk.Revit.DB import (BuiltInParameter, Dimension,\n                               ElementTransformUtils, Line, Reference,\n                               ReferenceArray)\nfrom Autodesk.Revit.Exceptions import OperationCanceledException\nfrom Autodesk.Revit.UI.Selection import ISelectionFilter, ObjectType\nfrom System.Collections.Generic import List\nfrom RevitServices.Persistence import DocumentManager\nfrom RevitServices.Transactions import TransactionManager\n\ndoc = DocumentManager.Instance.CurrentDBDocument\nuidoc = DocumentManager.Instance.CurrentUIApplication.ActiveUIDocument\n\nREMOVE_DUPES = bool(IN[0]) if len(IN) > 0 and IN[0] is not None else True\n\nMM = 1.0 / 304.8            # Revit internal units are feet\nPOS_TOL = 0.5 * MM          # witness lines closer than this count as aligned\nPARALLEL_TOL = 1e-6\nMIN_DUPE_LEN = (float(IN[1]) if len(IN) > 1 and IN[1] is not None else 90.0) * MM\nSPACING = (float(IN[2]) if len(IN) > 2 and IN[2] is not None else 600.0) * MM\n\n\ndef as_linear_dim(el):\n    \"\"\"Return el if it is a straight (linear/aligned) dimension, else None.\"\"\"\n    if el is None or not isinstance(el, Dimension):\n        return None\n    try:\n        crv = el.Curve\n    except Exception:       # spot dimensions etc. have no curve\n        return None\n    if crv is None or not isinstance(crv, Line):\n        return None\n    return el\n\n\nclass DimensionFilter(ISelectionFilter):\n    # PythonNet needs a unique namespace per run; IronPython ignores it.\n    __namespace__ = \"ConnectAlignedDims_\" + uuid.uuid4().hex\n\n    def AllowElement(self, element):\n        return as_linear_dim(element) is not None\n\n    def AllowReference(self, reference, position):\n        return False\n\n\ndef pick_dimensions():\n    \"\"\"Let the user pick dimensions; anything already selected is pre-picked.\"\"\"\n    pre = List[Reference]()\n    for eid in uidoc.Selection.GetElementIds():\n        el = as_linear_dim(doc.GetElement(eid))\n        if el is not None:\n            pre.Add(Reference(el))\n    prompt = \"Pick the dimension strings to connect, then click Finish\"\n    try:\n        refs = uidoc.Selection.PickObjects(ObjectType.Element, DimensionFilter(),\n                                           prompt, pre)\n    except OperationCanceledException:\n        return None\n    dims, seen = [], set()\n    for r in refs:\n        el = as_linear_dim(doc.GetElement(r.ElementId))\n        if el is not None and el.Id.IntegerValue not in seen:\n            seen.add(el.Id.IntegerValue)\n            dims.append(el)\n    return dims\n\n\ndef group_parallel(dims):\n    \"\"\"Group dimensions by owner view and (anti)parallel direction.\"\"\"\n    groups = []\n    for dim in dims:\n        d = dim.Curve.Direction.Normalize()\n        for g in groups:\n            if (g[\"view\"] == dim.OwnerViewId.IntegerValue\n                    and abs(abs(g[\"dir\"].DotProduct(d)) - 1.0) < PARALLEL_TOL):\n                g[\"dims\"].append(dim)\n                break\n        else:\n            groups.append({\"view\": dim.OwnerViewId.IntegerValue,\n                           \"dir\": d, \"dims\": [dim]})\n    return groups\n\n\ndef segment_intervals(dim, base, d):\n    \"\"\"[(t_start, t_end, segment_index)] along d for each segment.\"\"\"\n    if dim.NumberOfSegments == 0:\n        segs = [(dim.Origin, dim.Value)]\n    else:\n        segs = [(s.Origin, s.Value) for s in dim.Segments]\n    result = []\n    for i, (origin, value) in enumerate(segs):\n        if value is None:\n            continue\n        t = origin.Subtract(base).DotProduct(d)\n        result.append((t - value / 2.0, t + value / 2.0, i))\n    return result\n\n\ndef building_side(dims, view, base, perp):\n    \"\"\"Average position (across the strings) of the dimensioned elements.\"\"\"\n    vals = []\n    for dim in dims:\n        for r in dim.References:\n            el = doc.GetElement(r.ElementId)\n            if el is None:\n                continue\n            bb = el.get_BoundingBox(view) or el.get_BoundingBox(None)\n            if bb is None:\n                continue\n            centre = bb.Min.Add(bb.Max).Multiply(0.5)\n            vals.append(centre.Subtract(base).DotProduct(perp))\n    return sum(vals) / len(vals) if vals else None\n\n\ndef outer_duplicates(group, view):\n    \"\"\"[(dim, intervals, dup)]: dup holds the indices of dim's segments that\n    also appear in a string further from the building. None if the building\n    side can't be found.\"\"\"\n    d = group[\"dir\"]\n    perp = view.ViewDirection.CrossProduct(d).Normalize()\n    base = group[\"dims\"][0].Curve.Origin\n    s_bld = building_side(group[\"dims\"], view, base, perp)\n    if s_bld is None:\n        return None\n    info = []\n    for dim in group[\"dims\"]:\n        s = dim.Curve.Origin.Subtract(base).DotProduct(perp)\n        info.append((dim, abs(s - s_bld), segment_intervals(dim, base, d)))\n\n    result = []\n    for dim, dist, ivs in info:\n        dup = set()\n        for a, b, idx in ivs:\n            for dim2, dist2, ivs2 in info:\n                if dist2 <= dist + POS_TOL:\n                    continue          # only defer to strings further out\n                if any(abs(a - a2) <= POS_TOL and abs(b - b2) <= POS_TOL\n                       for a2, b2, _ in ivs2):\n                    dup.add(idx)\n                    break\n        result.append((dim, ivs, dup))\n    return result\n\n\ndef is_wall(a, b):\n    return b - a <= MIN_DUPE_LEN + POS_TOL\n\n\ndef plan_duplicate_removal(group, view):\n    \"\"\"[(dim, set(segment indices))] to remove, keeping the outermost copy.\"\"\"\n    info = outer_duplicates(group, view)\n    if info is None:\n        return None\n    removals = []\n    for dim, ivs, dup in info:\n        remove = set(idx for a, b, idx in ivs if idx in dup and not is_wall(a, b))\n        if remove:\n            remove |= stranded_walls(ivs, remove)\n            removals.append((dim, remove))\n    return removals\n\n\ndef plan_hidden_values(group, view):\n    \"\"\"Segments (walls repeated further out) whose number should be hidden.\"\"\"\n    info = outer_duplicates(group, view) or []\n    hide = []\n    for dim, ivs, dup in info:\n        segs = [dim] if dim.NumberOfSegments == 0 else list(dim.Segments)\n        hide.extend(segs[idx] for a, b, idx in ivs if idx in dup and is_wall(a, b))\n    return hide\n\n\n# Revit won't accept a blank override; these print as nothing.\nHIDDEN_TEXT = (u\"\\u200e\", u\"\\u200b\", u\"\\u00a0\")\n\n\ndef hide_value(seg):\n    for text in HIDDEN_TEXT:\n        try:\n            seg.ValueOverride = text\n            return True\n        except Exception:\n            pass\n    return False\n\n\ndef stranded_walls(ivs, remove):\n    \"\"\"Segments left in a run of walls with no room either side.\n\n    After removal a string falls into runs of kept segments; a run made only\n    of short segments (walls no longer than MIN_DUPE_LEN) is dropped too.\n    \"\"\"\n    stranded, run = set(), []\n    for a, b, idx in sorted(ivs, key=lambda iv: iv[2]) + [(0.0, 0.0, None)]:\n        if idx is None or idx in remove:\n            if run and all(is_wall(ra, rb) for ra, rb, _ in run):\n                stranded.update(i for _, _, i in run)\n            run = []\n        else:\n            run.append((a, b, idx))\n    return stranded\n\n\nTEXT_PROPS = (\"Above\", \"Below\", \"Prefix\", \"Suffix\", \"ValueOverride\")\n\n\ndef copy_segment_text(src, dst):\n    for prop in TEXT_PROPS:\n        try:\n            val = getattr(src, prop)\n            if val:\n                setattr(dst, prop, val)\n        except Exception:\n            pass\n    try:\n        if src.IsTextPositionAdjustable():\n            dst.TextPosition = src.TextPosition\n    except Exception:\n        pass\n\n\ndef rebuild_without(dim, remove, view):\n    \"\"\"Replace dim by one string per run of kept segments.\n\n    Returns the new dimensions, or None if dim could not be rebuilt.\n    \"\"\"\n    refs = list(dim.References)\n    segs = [dim] if dim.NumberOfSegments == 0 else list(dim.Segments)\n    if len(refs) != len(segs) + 1:\n        return None\n    runs, cur = [], []\n    for i in range(len(segs)):\n        if i in remove:\n            if cur:\n                runs.append(cur)\n            cur = []\n        else:\n            cur.append(i)\n    if cur:\n        runs.append(cur)\n\n    d = dim.Curve.Direction.Normalize()\n    o = dim.Curve.Origin\n    line = Line.CreateBound(o.Subtract(d.Multiply(100.0)), o.Add(d.Multiply(100.0)))\n    created = []\n    for run in runs:\n        ra = ReferenceArray()\n        for k in range(run[0], run[-1] + 2):\n            ra.Append(refs[k])\n        new = doc.Create.NewDimension(view, line, ra, dim.DimensionType)\n        new_segs = [new] if new.NumberOfSegments == 0 else list(new.Segments)\n        for src, dst in zip([segs[i] for i in run], new_segs):\n            copy_segment_text(src, dst)\n        created.append(new)\n    doc.Delete(dim.Id)\n    return created\n\n\ndef space_strings(group, view):\n    \"\"\"Move strings so each sits SPACING beyond the one inside it.\n\n    Strings at the same distance from the building (e.g. pieces of one\n    string) count as one row. Returns (rows moved, problems).\n    \"\"\"\n    d = group[\"dir\"]\n    perp = view.ViewDirection.CrossProduct(d).Normalize()\n    base = group[\"dims\"][0].Curve.Origin\n    s_bld = building_side(group[\"dims\"], view, base, perp)\n    if s_bld is None:\n        return 0, [\"Couldn't tell which side the building is on - strings not spaced.\"]\n    moved, problems = 0, []\n    for side in (1.0, -1.0):\n        offs = []\n        for dim in group[\"dims\"]:\n            off = dim.Curve.Origin.Subtract(base).DotProduct(perp) - s_bld\n            if off * side > 0:\n                offs.append((abs(off), dim))\n        offs.sort(key=lambda o: o[0])\n        rows = []\n        for off, dim in offs:\n            if rows and off - rows[-1][0] <= POS_TOL:\n                rows[-1][1].append(dim)\n            else:\n                rows.append((off, [dim]))\n        for k, (off, row) in enumerate(rows):\n            if k == 0:\n                continue\n            delta = rows[0][0] + k * SPACING - off\n            if abs(delta) <= POS_TOL:\n                continue\n            for dim in row:\n                try:\n                    ElementTransformUtils.MoveElement(\n                        doc, dim.Id, perp.Multiply(delta * side))\n                except Exception as ex:\n                    problems.append(\"Couldn't move dimension {0}: {1}\"\n                                    .format(dim.Id.IntegerValue, ex))\n            moved += 1\n    return moved, problems\n\n\ndef turn_off_leader(dim):\n    \"\"\"Untick the dimension's Leader box. Returns True if it was ticked.\"\"\"\n    p = None\n    try:\n        p = dim.get_Parameter(BuiltInParameter.DIM_LEADER)\n    except Exception:\n        pass\n    if p is None:\n        p = dim.LookupParameter(\"Leader\")\n    if p is None or p.IsReadOnly or p.AsInteger() == 0:\n        return False\n    p.Set(0)\n    return True\n\n\ndef rearm_for_next_run():\n    \"\"\"Mark this node as modified so the next Run executes it again.\n\n    Dynamo skips nodes whose inputs have not changed, which would stop the\n    picker from appearing a second time.\n    \"\"\"\n    try:\n        clr.AddReference(\"DynamoRevitDS\")\n        import Dynamo\n        ws = Dynamo.Applications.DynamoRevit.RevitDynamoModel.CurrentWorkspace\n        for node in ws.Nodes:\n            if getattr(node, \"Script\", None) and RERUN_MARKER in node.Script:\n                node.MarkNodeAsModified(True)\n    except Exception:\n        pass\n\n\nRERUN_MARKER = \"ConnectAlignedDims_rerun_marker\"\n\nreport = []\ndims = pick_dimensions()\nif dims is None:\n    OUT = \"Cancelled - nothing changed.\"\nelif len(dims) < 2:\n    OUT = \"Pick at least two parallel dimension strings.\"\nelse:\n    removed = hidden = spaced = leaders = 0\n    TransactionManager.Instance.EnsureInTransaction(doc)\n    for dim in dims:\n        if turn_off_leader(dim):\n            leaders += 1\n    for g in group_parallel(dims):\n        if len(g[\"dims\"]) < 2:\n            continue\n        view = doc.GetElement(g[\"dims\"][0].OwnerViewId)\n        if SPACING > 0:\n            n, problems = space_strings(g, view)\n            spaced += n\n            report.extend(problems)\n            if n:\n                doc.Regenerate()\n        if REMOVE_DUPES:\n            plan = plan_duplicate_removal(g, view)\n            if plan is None:\n                report.append(\"Couldn't tell which side the building is on - \"\n                              \"no duplicate segments removed.\")\n                plan = []\n            for dim, remove in plan:\n                # Read Ids now: touching dim after it is deleted throws.\n                old_id = dim.Id.IntegerValue\n                others = [x for x in g[\"dims\"] if x.Id.IntegerValue != old_id]\n                new_dims = rebuild_without(dim, remove, view)\n                if new_dims is None:\n                    report.append(\"Couldn't rebuild dimension {0} - left as is.\"\n                                  .format(old_id))\n                    continue\n                removed += len(remove)\n                for new in new_dims:\n                    turn_off_leader(new)\n                g[\"dims\"] = others + new_dims\n            if plan:\n                doc.Regenerate()\n            for seg in plan_hidden_values(g, view):\n                if hide_value(seg):\n                    hidden += 1\n    TransactionManager.Instance.TransactionTaskDone()\n    report.insert(0, \"{0} dimension(s) picked, {1} row(s) of strings moved, \"\n                     \"{2} duplicate segment(s) removed, \"\n                     \"{3} repeated wall value(s) hidden, \"\n                     \"{4} leader(s) turned off.\"\n                  .format(len(dims), spaced, removed, hidden, leaders))\n    OUT = \"\\n\".join(report)\n\nrearm_for_next_run()\n",
       "Engine": "CPython3",
       "VariableInputPorts": true,
-      "Id": "c4bb82b7b2d545388fa20cb299b05b4c",
+      "Id": "ce6d537466d24a1a8c17dccd9d41dc20",
       "Inputs": [
         {
-          "Id": "44ae9241e9244401a9f65b6b231933c0",
+          "Id": "60bb29b8948d49109a96bba1dc846757",
           "Name": "IN[0]",
           "Description": "Input #0",
           "UsingDefaultValue": false,
@@ -122,7 +122,7 @@
           "KeepListStructure": false
         },
         {
-          "Id": "5ec1deb704ec46bda05811420318259f",
+          "Id": "034b88d84021444dbe8056c349a84d57",
           "Name": "IN[1]",
           "Description": "Input #1",
           "UsingDefaultValue": false,
@@ -131,7 +131,7 @@
           "KeepListStructure": false
         },
         {
-          "Id": "d90e93fe8ed545739688be9c44b4247c",
+          "Id": "de95668a7961443dbe422b4584964743",
           "Name": "IN[2]",
           "Description": "Input #2",
           "UsingDefaultValue": false,
@@ -142,7 +142,7 @@
       ],
       "Outputs": [
         {
-          "Id": "967cecc7bf0e456fa60edd1728356c91",
+          "Id": "7c31cd6e7f5f4a178db6b74e141889e1",
           "Name": "OUT",
           "Description": "Result of the python script",
           "UsingDefaultValue": false,
@@ -157,21 +157,21 @@
   ],
   "Connectors": [
     {
-      "Start": "1d71f8ef23d842d0baa6b2f57b331aed",
-      "End": "44ae9241e9244401a9f65b6b231933c0",
-      "Id": "ccfd697799a24f7986e6178bb5ce40c4",
+      "Start": "18203a462db84180b85d863e6a762788",
+      "End": "60bb29b8948d49109a96bba1dc846757",
+      "Id": "265e570dfab5495c9a839616a9daba1d",
       "IsHidden": "False"
     },
     {
-      "Start": "42d7df89a7514713996ccf92e43526cd",
-      "End": "5ec1deb704ec46bda05811420318259f",
-      "Id": "a6ef5d67f0984a039b9cd6bce98c99ac",
+      "Start": "2ec234f99ada4c19b12d9551f1d854af",
+      "End": "034b88d84021444dbe8056c349a84d57",
+      "Id": "f331d6f71e554d0ebaebc5fe8251e658",
       "IsHidden": "False"
     },
     {
-      "Start": "ca50e67536ef407f84b055ac35311f27",
-      "End": "d90e93fe8ed545739688be9c44b4247c",
-      "Id": "d29bd96dce19455f9732fa156f8fbdbd",
+      "Start": "30262efa3fcb4aa3a766b8fb0e2f1a0f",
+      "End": "de95668a7961443dbe422b4584964743",
+      "Id": "d407bfcdec524ec1a419da0a5d4128ee",
       "IsHidden": "False"
     }
   ],
@@ -201,7 +201,7 @@
     },
     "NodeViews": [
       {
-        "Id": "68a8264091e04d7a9d87d34eb544b668",
+        "Id": "1ca13ac546b046268f76b5e4107f4964",
         "Name": "Remove Duplicate Segments",
         "IsSetAsInput": true,
         "IsSetAsOutput": false,
@@ -211,7 +211,7 @@
         "Y": 0.0
       },
       {
-        "Id": "e9394c49949c4158903ae8957b1eedd7",
+        "Id": "1448682c28064a39b17f40795463ee3d",
         "Name": "Remove Duplicates Longer Than (mm)",
         "IsSetAsInput": true,
         "IsSetAsOutput": false,
@@ -221,7 +221,7 @@
         "Y": 130.0
       },
       {
-        "Id": "d0dc1573d99a40b1b1a52ef20f93e43a",
+        "Id": "309272b0677a4b56bb6a65e5e2236129",
         "Name": "String Spacing (mm)",
         "IsSetAsInput": true,
         "IsSetAsOutput": false,
@@ -231,7 +231,7 @@
         "Y": 260.0
       },
       {
-        "Id": "c4bb82b7b2d545388fa20cb299b05b4c",
+        "Id": "ce6d537466d24a1a8c17dccd9d41dc20",
         "Name": "Connect Aligned Dimensions",
         "IsSetAsInput": false,
         "IsSetAsOutput": true,

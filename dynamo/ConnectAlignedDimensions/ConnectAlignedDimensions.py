@@ -3,7 +3,8 @@ Connect Aligned Dimensions  (Dynamo Python node for Revit)
 
 Pick the parallel dimension strings you want to tidy, then press Finish on
 the Options Bar. The strings are spaced a set distance apart, moving outward
-from the one closest to the building.
+from the one closest to the building. The Leader box is unticked on every
+picked string (and on any string the script rebuilds).
 
 When the same segment (same start and end witness lines) appears
 in more than one picked string, it is removed from every string except the
@@ -32,8 +33,9 @@ import uuid
 clr.AddReference("RevitAPI")
 clr.AddReference("RevitAPIUI")
 clr.AddReference("RevitServices")
-from Autodesk.Revit.DB import (Dimension, ElementTransformUtils, Line,
-                               Reference, ReferenceArray)
+from Autodesk.Revit.DB import (BuiltInParameter, Dimension,
+                               ElementTransformUtils, Line, Reference,
+                               ReferenceArray)
 from Autodesk.Revit.Exceptions import OperationCanceledException
 from Autodesk.Revit.UI.Selection import ISelectionFilter, ObjectType
 from System.Collections.Generic import List
@@ -332,6 +334,21 @@ def space_strings(group, view):
     return moved, problems
 
 
+def turn_off_leader(dim):
+    """Untick the dimension's Leader box. Returns True if it was ticked."""
+    p = None
+    try:
+        p = dim.get_Parameter(BuiltInParameter.DIM_LEADER)
+    except Exception:
+        pass
+    if p is None:
+        p = dim.LookupParameter("Leader")
+    if p is None or p.IsReadOnly or p.AsInteger() == 0:
+        return False
+    p.Set(0)
+    return True
+
+
 def rearm_for_next_run():
     """Mark this node as modified so the next Run executes it again.
 
@@ -358,8 +375,11 @@ if dims is None:
 elif len(dims) < 2:
     OUT = "Pick at least two parallel dimension strings."
 else:
-    removed = hidden = spaced = 0
+    removed = hidden = spaced = leaders = 0
     TransactionManager.Instance.EnsureInTransaction(doc)
+    for dim in dims:
+        if turn_off_leader(dim):
+            leaders += 1
     for g in group_parallel(dims):
         if len(g["dims"]) < 2:
             continue
@@ -386,6 +406,8 @@ else:
                                   .format(old_id))
                     continue
                 removed += len(remove)
+                for new in new_dims:
+                    turn_off_leader(new)
                 g["dims"] = others + new_dims
             if plan:
                 doc.Regenerate()
@@ -395,8 +417,9 @@ else:
     TransactionManager.Instance.TransactionTaskDone()
     report.insert(0, "{0} dimension(s) picked, {1} row(s) of strings moved, "
                      "{2} duplicate segment(s) removed, "
-                     "{3} repeated wall value(s) hidden."
-                  .format(len(dims), spaced, removed, hidden))
+                     "{3} repeated wall value(s) hidden, "
+                     "{4} leader(s) turned off."
+                  .format(len(dims), spaced, removed, hidden, leaders))
     OUT = "\n".join(report)
 
 rearm_for_next_run()
