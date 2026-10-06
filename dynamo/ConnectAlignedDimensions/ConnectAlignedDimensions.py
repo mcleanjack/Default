@@ -254,15 +254,51 @@ def copy_segment_text(src, dst):
         pass
 
 
+def stable_ref(ref):
+    """Fresh copy of a reference taken from an existing dimension.
+
+    Revit sometimes rejects such references in NewDimension; going through
+    the stable representation is the usual workaround.
+    """
+    try:
+        return Reference.ParseFromStableRepresentation(
+            doc, ref.ConvertToStableRepresentation(doc))
+    except Exception:
+        return ref
+
+
+def ref_key(ref):
+    try:
+        return ref.ConvertToStableRepresentation(doc)
+    except Exception:
+        return None
+
+
+def new_string(view, line, refs, dtype):
+    """Create a dimension through refs, trying fresh copies first."""
+    error = None
+    for convert in (stable_ref, lambda r: r):
+        ra = ReferenceArray()
+        for r in refs:
+            ra.Append(convert(r))
+        try:
+            return doc.Create.NewDimension(view, line, ra, dtype)
+        except Exception as ex:
+            error = ex
+    raise error
+
+
 def rebuild_without(dim, remove, view):
     """Replace dim by one string per run of kept segments.
 
-    Returns the new dimensions, or None if dim could not be rebuilt.
+    Returns the new dimensions. If Revit refuses any piece, the pieces made
+    so far are deleted, dim is left as it was and the error is raised.
     """
     refs = list(dim.References)
     segs = [dim] if dim.NumberOfSegments == 0 else list(dim.Segments)
     if len(refs) != len(segs) + 1:
-        return None
+        raise ValueError("{0} references for {1} segments".format(
+            len(refs), len(segs)))
     runs, cur = [], []
     for i in range(len(segs)):
         if i in remove:
@@ -278,15 +314,26 @@ def rebuild_without(dim, remove, view):
     o = dim.Curve.Origin
     line = Line.CreateBound(o.Subtract(d.Multiply(100.0)), o.Add(d.Multiply(100.0)))
     created = []
-    for run in runs:
-        ra = ReferenceArray()
-        for k in range(run[0], run[-1] + 2):
-            ra.Append(refs[k])
-        new = doc.Create.NewDimension(view, line, ra, dim.DimensionType)
-        new_segs = [new] if new.NumberOfSegments == 0 else list(new.Segments)
-        for src, dst in zip([segs[i] for i in run], new_segs):
-            copy_segment_text(src, dst)
-        created.append(new)
+    try:
+        for run in runs:
+            run_refs, seen = [], set()
+            for k in range(run[0], run[-1] + 2):
+                key = ref_key(refs[k])
+                if key is None or key not in seen:
+                    run_refs.append(refs[k])
+                    if key is not None:
+                        seen.add(key)
+            if len(run_refs) < 2:
+                continue              # nothing left to measure
+            new = new_string(view, line, run_refs, dim.DimensionType)
+            new_segs = [new] if new.NumberOfSegments == 0 else list(new.Segments)
+            for src, dst in zip([segs[i] for i in run], new_segs):
+                copy_segment_text(src, dst)
+            created.append(new)
+    except Exception:
+        for new in created:
+            doc.Delete(new.Id)
+        raise
     doc.Delete(dim.Id)
     return created
 
@@ -400,10 +447,11 @@ else:
                 # Read Ids now: touching dim after it is deleted throws.
                 old_id = dim.Id.IntegerValue
                 others = [x for x in g["dims"] if x.Id.IntegerValue != old_id]
-                new_dims = rebuild_without(dim, remove, view)
-                if new_dims is None:
-                    report.append("Couldn't rebuild dimension {0} - left as is."
-                                  .format(old_id))
+                try:
+                    new_dims = rebuild_without(dim, remove, view)
+                except Exception as ex:
+                    report.append("Couldn't rebuild dimension {0} - left as is "
+                                  "({1}).".format(old_id, ex))
                     continue
                 removed += len(remove)
                 for new in new_dims:
