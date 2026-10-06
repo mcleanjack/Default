@@ -240,6 +240,8 @@ TEXT_PROPS = ("Above", "Below", "Prefix", "Suffix", "ValueOverride")
 
 
 def copy_segment_text(src, dst):
+    """Copy text overrides. The value's position is left to Revit: copying
+    TextPosition onto a rebuilt string put values over the wrong segment."""
     for prop in TEXT_PROPS:
         try:
             val = getattr(src, prop)
@@ -247,11 +249,22 @@ def copy_segment_text(src, dst):
                 setattr(dst, prop, val)
         except Exception:
             pass
-    try:
-        if src.IsTextPositionAdjustable():
-            dst.TextPosition = src.TextPosition
-    except Exception:
-        pass
+
+
+def match_segments(src_segs, dst_segs, origin, d):
+    """Pair each new segment with the old one at the same place on the line."""
+    def centre(seg):
+        return seg.Origin.Subtract(origin).DotProduct(d)
+    src = [(centre(sg), sg.Value, sg) for sg in src_segs]
+    pairs = []
+    for dst in dst_segs:
+        t, v = centre(dst), dst.Value
+        for ts, vs, sg in src:
+            if (v is not None and vs is not None and abs(t - ts) <= POS_TOL
+                    and abs(v - vs) <= POS_TOL):
+                pairs.append((sg, dst))
+                break
+    return pairs
 
 
 def stable_ref(ref):
@@ -326,8 +339,9 @@ def rebuild_without(dim, remove, view):
             if len(run_refs) < 2:
                 continue              # nothing left to measure
             new = new_string(view, line, run_refs, dim.DimensionType)
+            doc.Regenerate()
             new_segs = [new] if new.NumberOfSegments == 0 else list(new.Segments)
-            for src, dst in zip([segs[i] for i in run], new_segs):
+            for src, dst in match_segments([segs[i] for i in run], new_segs, o, d):
                 copy_segment_text(src, dst)
             created.append(new)
     except Exception:

@@ -36,7 +36,7 @@ Strings at the same distance from the building (such as the pieces of a rebuilt 
 - Witness lines are treated as aligned when they are within 0.5 mm of each other (`POS_TOL`).
 - The script only compares strings that point the same way and sit in the same view. You can pick horizontal and vertical strings together.
 - You can press Run again as many times as you like; each run brings the picker back.
-- Revit can't delete a segment from the middle of a string, so the script replaces the inner string with new strings either side of the removed segment. Above/Below text, prefixes, suffixes, value overrides and moved text are copied across. Other instance settings on the old string are not.
+- Revit can't delete a segment from the middle of a string, so the script replaces the inner string with new strings either side of the removed segment. Above/Below text, prefixes, suffixes and value overrides are copied to the segment at the same place on the new string. The numbers go back to Revit's default position above each segment, so any you had dragged by hand need moving again. Other instance settings on the old string are not copied.
 - Hidden 90 mm numbers: Revit won't allow a blank override, so the number is replaced with an invisible character. To show it again, clear *Replace With Text* on that segment.
 - "Furthest from the building" is worked out from the elements the strings dimension.
 - The graph uses the CPython3 engine. If your Dynamo doesn't have that engine (for example, Revit 2025+ uses PythonNet3), pick the engine it has from the Python node's dropdown. The code works on IronPython2, CPython3 and PythonNet3.
