@@ -226,7 +226,7 @@ def stranded_walls(ivs, remove):
     of short segments (walls no longer than MIN_DUPE_LEN) is dropped too.
     """
     stranded, run = set(), []
-    for a, b, idx in sorted(ivs, key=lambda iv: iv[2]) + [(0.0, 0.0, None)]:
+    for a, b, idx in sorted(ivs, key=lambda iv: iv[0]) + [(0.0, 0.0, None)]:
         if idx is None or idx in remove:
             if run and all(is_wall(ra, rb) for ra, rb, _ in run):
                 stranded.update(i for _, _, i in run)
@@ -280,13 +280,6 @@ def stable_ref(ref):
         return ref
 
 
-def ref_key(ref):
-    try:
-        return ref.ConvertToStableRepresentation(doc)
-    except Exception:
-        return None
-
-
 def new_string(view, line, refs, dtype):
     """Create a dimension through refs, trying fresh copies first."""
     error = None
@@ -301,49 +294,106 @@ def new_string(view, line, refs, dtype):
     raise error
 
 
+def boundaries(dim, origin, d):
+    """Sorted, de-duplicated witness line positions of dim along d."""
+    pts = []
+    for a, b, _ in segment_intervals(dim, origin, d):
+        pts.extend((a, b))
+    pts.sort()
+    result = []
+    for t in pts:
+        if not result or t - result[-1] > POS_TOL:
+            result.append(t)
+    return result
+
+
+def find(t, positions):
+    for i, p in enumerate(positions):
+        if p is not None and abs(p - t) <= POS_TOL:
+            return i
+    return None
+
+
+def reference_positions(dim, refs, view, line, origin, d):
+    """Position along d of each reference.
+
+    Revit doesn't list a dimension's references in order along the line
+    (e.g. a witness line added later goes on the end) and can't report where
+    a reference is. So each reference is dropped in turn from a temporary
+    copy of the string, and the witness line that disappears is its own.
+    """
+    bounds = boundaries(dim, origin, d)
+    positions = []
+    for i in range(len(refs)):
+        tmp = new_string(view, line, refs[:i] + refs[i + 1:], dim.DimensionType)
+        try:
+            doc.Regenerate()
+            left = boundaries(tmp, origin, d)
+        finally:
+            doc.Delete(tmp.Id)
+        missing = [t for t in bounds if find(t, left) is None]
+        if len(missing) != 1:
+            raise ValueError("couldn't locate witness line {0} of {1}".format(
+                i + 1, len(refs)))
+        positions.append(missing[0])
+    return positions
+
+
 def rebuild_without(dim, remove, view):
     """Replace dim by one string per run of kept segments.
 
-    Returns the new dimensions. If Revit refuses any piece, the pieces made
-    so far are deleted, dim is left as it was and the error is raised.
+    Returns the new dimensions. If anything goes wrong, the pieces made so
+    far are deleted, dim is left as it was and the error is raised.
     """
     refs = list(dim.References)
     segs = [dim] if dim.NumberOfSegments == 0 else list(dim.Segments)
     if len(refs) != len(segs) + 1:
         raise ValueError("{0} references for {1} segments".format(
             len(refs), len(segs)))
+    d = dim.Curve.Direction.Normalize()
+    o = dim.Curve.Origin
+    line = Line.CreateBound(o.Subtract(d.Multiply(100.0)), o.Add(d.Multiply(100.0)))
+
+    # Runs of kept segments, walking along the line.
     runs, cur = [], []
-    for i in range(len(segs)):
-        if i in remove:
+    for a, b, idx in sorted(segment_intervals(dim, o, d), key=lambda iv: iv[0]):
+        if idx in remove:
             if cur:
                 runs.append(cur)
             cur = []
         else:
-            cur.append(i)
+            cur.append((a, b, idx))
     if cur:
         runs.append(cur)
+    if not runs:
+        doc.Delete(dim.Id)
+        return []
 
-    d = dim.Curve.Direction.Normalize()
-    o = dim.Curve.Origin
-    line = Line.CreateBound(o.Subtract(d.Multiply(100.0)), o.Add(d.Multiply(100.0)))
+    positions = reference_positions(dim, refs, view, line, o, d)
     created = []
     try:
         for run in runs:
-            run_refs, seen = [], set()
-            for k in range(run[0], run[-1] + 2):
-                key = ref_key(refs[k])
-                if key is None or key not in seen:
-                    run_refs.append(refs[k])
-                    if key is not None:
-                        seen.add(key)
-            if len(run_refs) < 2:
-                continue              # nothing left to measure
+            wanted = [run[0][0]] + [b for _, b, _ in run]
+            free = list(positions)
+            run_refs = []
+            for t in wanted:
+                k = find(t, free)
+                if k is None:
+                    raise ValueError("no witness line at a segment end")
+                free[k] = None
+                run_refs.append(refs[k])
             new = new_string(view, line, run_refs, dim.DimensionType)
-            doc.Regenerate()
-            new_segs = [new] if new.NumberOfSegments == 0 else list(new.Segments)
-            for src, dst in match_segments([segs[i] for i in run], new_segs, o, d):
-                copy_segment_text(src, dst)
             created.append(new)
+            doc.Regenerate()
+            got = sorted((a, b) for a, b, _ in segment_intervals(new, o, d))
+            if (len(got) != len(run) or any(
+                    abs(a - ra) > POS_TOL or abs(b - rb) > POS_TOL
+                    for (a, b), (ra, rb, _) in zip(got, run))):
+                raise ValueError("rebuilt string didn't match the original")
+            new_segs = [new] if new.NumberOfSegments == 0 else list(new.Segments)
+            for src, dst in match_segments([segs[i] for _, _, i in run],
+                                           new_segs, o, d):
+                copy_segment_text(src, dst)
     except Exception:
         for new in created:
             doc.Delete(new.Id)
