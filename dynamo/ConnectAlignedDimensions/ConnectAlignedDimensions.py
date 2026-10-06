@@ -14,11 +14,11 @@ the removed segment, keeping each segment's text overrides.
 
 Inputs
     IN[0]  Remove duplicate segments from the inner strings (bool).
-    IN[1]  Only remove duplicates longer than this, in mm (number). The
-           default 90 keeps 90 mm walls on every string but removes thicker
-           walls (e.g. 240) and rooms. Walls this short that are left with
-           no room either side after the removal are deleted as well, and
-           the number on the rest is hidden where an outer string shows it.
+    IN[1]  Max wall thickness, in mm (number). Repeated segments this long
+           or shorter are walls (default 240, so 90 and 240 walls): they stay
+           on every string, but their number is hidden where a string further
+           out shows it. Longer repeats (rooms) are removed. Walls left with
+           no room either side after the removal are deleted as well.
     IN[2]  Space the strings this far apart, in mm (number, model size).
            The string closest to the building stays put; the others move
            outward. 0 leaves the strings where they are.
@@ -50,7 +50,7 @@ REMOVE_DUPES = bool(IN[0]) if len(IN) > 0 and IN[0] is not None else True
 MM = 1.0 / 304.8            # Revit internal units are feet
 POS_TOL = 0.5 * MM          # witness lines closer than this count as aligned
 PARALLEL_TOL = 1e-6
-MIN_DUPE_LEN = (float(IN[1]) if len(IN) > 1 and IN[1] is not None else 90.0) * MM
+MIN_DUPE_LEN = (float(IN[1]) if len(IN) > 1 and IN[1] is not None else 240.0) * MM
 SPACING = (float(IN[2]) if len(IN) > 2 and IN[2] is not None else 600.0) * MM
 
 
