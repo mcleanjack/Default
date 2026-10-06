@@ -21,6 +21,8 @@ Inputs
            with no room either side after the removal are deleted as well.
            A removed room's name is added to the copy that is kept, e.g.
            "FAMILY - MEALS" (innermost string's name first).
+           Only copies on neighbouring strings count: a string between them
+           with a different segment across that part keeps both as they are.
     IN[2]  Space the strings this far apart, in mm (number, model size).
            The string closest to the building stays put; the others move
            outward. 0 leaves the strings where they are.
@@ -151,8 +153,8 @@ def building_side(dims, view, base, perp):
 
 
 def string_info(group, view):
-    """[(dim, distance from building, intervals)], or None if the building
-    side can't be found."""
+    """[(dim, distance from building, side, intervals)], or None if the
+    building side can't be found."""
     d = group["dir"]
     perp = view.ViewDirection.CrossProduct(d).Normalize()
     base = group["dims"][0].Curve.Origin
@@ -161,29 +163,42 @@ def string_info(group, view):
         return None
     info = []
     for dim in group["dims"]:
-        s = dim.Curve.Origin.Subtract(base).DotProduct(perp)
-        info.append((dim, abs(s - s_bld), segment_intervals(dim, base, d)))
+        off = dim.Curve.Origin.Subtract(base).DotProduct(perp) - s_bld
+        info.append((dim, abs(off), off > 0, segment_intervals(dim, base, d)))
     return info
+
+
+def next_copy(info, k, a, b):
+    """The same segment (a, b) on the next string out from string k.
+
+    Walks outward through the strings on the same side of the building. A
+    string that doesn't reach (a, b) is skipped; one with a different
+    segment across (a, b) separates the copies, so there is no next copy.
+    Returns (string index, segment index) or None.
+    """
+    dist, side = info[k][1], info[k][2]
+    outward = sorted((j for j, x in enumerate(info)
+                      if x[2] == side and x[1] > dist + POS_TOL),
+                     key=lambda j: info[j][1])
+    for j in outward:
+        for a2, b2, idx2 in info[j][3]:
+            if abs(a - a2) <= POS_TOL and abs(b - b2) <= POS_TOL:
+                return j, idx2
+        if any(min(b, b2) - max(a, a2) > POS_TOL for a2, b2, _ in info[j][3]):
+            return None
+    return None
 
 
 def outer_duplicates(group, view):
     """[(dim, intervals, dup)]: dup holds the indices of dim's segments that
-    also appear in a string further from the building. None if the building
-    side can't be found."""
+    are repeated on the next string out (with nothing different between).
+    None if the building side can't be found."""
     info = string_info(group, view)
     if info is None:
         return None
     result = []
-    for dim, dist, ivs in info:
-        dup = set()
-        for a, b, idx in ivs:
-            for dim2, dist2, ivs2 in info:
-                if dist2 <= dist + POS_TOL:
-                    continue          # only defer to strings further out
-                if any(abs(a - a2) <= POS_TOL and abs(b - b2) <= POS_TOL
-                       for a2, b2, _ in ivs2):
-                    dup.add(idx)
-                    break
+    for k, (dim, dist, side, ivs) in enumerate(info):
+        dup = set(idx for a, b, idx in ivs if next_copy(info, k, a, b))
         result.append((dim, ivs, dup))
     return result
 
@@ -214,21 +229,36 @@ def merge_room_names(group, view):
 
     E.g. 4260 FAMILY on an inner string and 4260 MEALS further out leaves
     "FAMILY - MEALS" (innermost first) on the outer one, which is the copy
-    that is kept. Returns how many segments were renamed.
+    that is kept. Copies separated by a string with a different segment
+    across them are left alone. Returns how many segments were renamed.
     """
     info = string_info(group, view) or []
-    copies = []                       # [(a, b, [(dist, segment)])]
-    for dim, dist, ivs in info:
-        segs = [dim] if dim.NumberOfSegments == 0 else list(dim.Segments)
+    # Link each room to its copy on the next string out; follow the links
+    # from the innermost copy to get each chain of copies.
+    nxt, has_inner = {}, set()
+    for k, (dim, dist, side, ivs) in enumerate(info):
         for a, b, idx in ivs:
             if is_wall(a, b):
                 continue
-            for ca, cb, members in copies:
-                if abs(a - ca) <= POS_TOL and abs(b - cb) <= POS_TOL:
-                    members.append((dist, segs[idx]))
-                    break
-            else:
-                copies.append((a, b, [(dist, segs[idx])]))
+            n = next_copy(info, k, a, b)
+            if n:
+                nxt[(k, idx)] = n
+                has_inner.add(n)
+
+    def segment(key):
+        dim = info[key[0]][0]
+        segs = [dim] if dim.NumberOfSegments == 0 else list(dim.Segments)
+        return segs[key[1]]
+
+    copies = []                       # [(a, b, [(dist, segment)])]
+    for start in nxt:
+        if start in has_inner:
+            continue
+        chain, key = [], start
+        while key is not None:
+            chain.append((info[key[0]][1], segment(key)))
+            key = nxt.get(key)
+        copies.append((None, None, chain))
     renamed = 0
     for _, _, members in copies:
         if len(members) < 2:

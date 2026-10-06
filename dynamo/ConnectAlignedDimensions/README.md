@@ -30,6 +30,8 @@ The script does not connect the strings' witness lines. Revit's API can't length
 2. Space the strings.
 3. Remove repeated rooms and hide repeated wall numbers.
 
+A segment only counts as repeated when the copy is on the next string out. Strings between them must either not reach that part of the line or have the same segment there. If a string between has different segments across it (for example 3100 BED 1 and 3100 ENSUITE with 1960 WIR | 90 | 1050 between), both copies and their room names are left as they are. The same applies to hiding repeated wall numbers.
+
 Strings at the same distance from the building (such as the pieces of a rebuilt string) count as one row and move together. Strings on opposite sides of the building are spaced separately. Pinned dimensions can't be moved; the report lists them.
 
 ## Notes
