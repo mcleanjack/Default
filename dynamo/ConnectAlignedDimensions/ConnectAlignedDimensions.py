@@ -17,8 +17,10 @@ Inputs
     IN[1]  Max wall thickness, in mm (number). Repeated segments this long
            or shorter are walls (default 240, so 90 and 240 walls): they stay
            on every string, but their number is hidden where a string further
-           out shows it. Longer repeats (rooms) are removed. Walls left with
-           no room either side after the removal are deleted as well.
+           out shows it. Longer repeats (rooms) are removed. 90 mm walls left
+           with no room either side after the removal are deleted as well.
+           A removed room's name is added to the copy that is kept, e.g.
+           "FAMILY - MEALS" (innermost string's name first).
     IN[2]  Space the strings this far apart, in mm (number, model size).
            The string closest to the building stays put; the others move
            outward. 0 leaves the strings where they are.
@@ -51,6 +53,7 @@ MM = 1.0 / 304.8            # Revit internal units are feet
 POS_TOL = 0.5 * MM          # witness lines closer than this count as aligned
 PARALLEL_TOL = 1e-6
 MIN_DUPE_LEN = (float(IN[1]) if len(IN) > 1 and IN[1] is not None else 240.0) * MM
+STRANDED_MAX = 90.0 * MM     # lone walls up to this thick are deleted
 SPACING = (float(IN[2]) if len(IN) > 2 and IN[2] is not None else 600.0) * MM
 
 
@@ -147,9 +150,8 @@ def building_side(dims, view, base, perp):
     return sum(vals) / len(vals) if vals else None
 
 
-def outer_duplicates(group, view):
-    """[(dim, intervals, dup)]: dup holds the indices of dim's segments that
-    also appear in a string further from the building. None if the building
+def string_info(group, view):
+    """[(dim, distance from building, intervals)], or None if the building
     side can't be found."""
     d = group["dir"]
     perp = view.ViewDirection.CrossProduct(d).Normalize()
@@ -161,7 +163,16 @@ def outer_duplicates(group, view):
     for dim in group["dims"]:
         s = dim.Curve.Origin.Subtract(base).DotProduct(perp)
         info.append((dim, abs(s - s_bld), segment_intervals(dim, base, d)))
+    return info
 
+
+def outer_duplicates(group, view):
+    """[(dim, intervals, dup)]: dup holds the indices of dim's segments that
+    also appear in a string further from the building. None if the building
+    side can't be found."""
+    info = string_info(group, view)
+    if info is None:
+        return None
     result = []
     for dim, dist, ivs in info:
         dup = set()
@@ -195,6 +206,51 @@ def plan_duplicate_removal(group, view):
     return removals
 
 
+NAME_SEPARATOR = " - "
+
+
+def merge_room_names(group, view):
+    """Give the outermost copy of each repeated room all the copies' names.
+
+    E.g. 4260 FAMILY on an inner string and 4260 MEALS further out leaves
+    "FAMILY - MEALS" (innermost first) on the outer one, which is the copy
+    that is kept. Returns how many segments were renamed.
+    """
+    info = string_info(group, view) or []
+    copies = []                       # [(a, b, [(dist, segment)])]
+    for dim, dist, ivs in info:
+        segs = [dim] if dim.NumberOfSegments == 0 else list(dim.Segments)
+        for a, b, idx in ivs:
+            if is_wall(a, b):
+                continue
+            for ca, cb, members in copies:
+                if abs(a - ca) <= POS_TOL and abs(b - cb) <= POS_TOL:
+                    members.append((dist, segs[idx]))
+                    break
+            else:
+                copies.append((a, b, [(dist, segs[idx])]))
+    renamed = 0
+    for _, _, members in copies:
+        if len(members) < 2:
+            continue
+        members.sort(key=lambda m: m[0])
+        names = []
+        for _, seg in members:
+            for part in (seg.Below or "").split(NAME_SEPARATOR):
+                part = part.strip()
+                if part and part not in names:
+                    names.append(part)
+        keeper = members[-1][1]
+        merged = NAME_SEPARATOR.join(names)
+        if merged and merged != (keeper.Below or ""):
+            try:
+                keeper.Below = merged
+                renamed += 1
+            except Exception:
+                pass
+    return renamed
+
+
 def plan_hidden_values(group, view):
     """Segments (walls repeated further out) whose number should be hidden."""
     info = outer_duplicates(group, view) or []
@@ -223,12 +279,13 @@ def stranded_walls(ivs, remove):
     """Segments left in a run of walls with no room either side.
 
     After removal a string falls into runs of kept segments; a run made only
-    of short segments (walls no longer than MIN_DUPE_LEN) is dropped too.
+    of 90 mm walls (no longer than STRANDED_MAX) is dropped too. Thicker
+    walls, such as a lone 240, are kept.
     """
     stranded, run = set(), []
     for a, b, idx in sorted(ivs, key=lambda iv: iv[0]) + [(0.0, 0.0, None)]:
         if idx is None or idx in remove:
-            if run and all(is_wall(ra, rb) for ra, rb, _ in run):
+            if run and all(rb - ra <= STRANDED_MAX + POS_TOL for ra, rb, _ in run):
                 stranded.update(i for _, _, i in run)
             run = []
         else:
@@ -486,7 +543,7 @@ if dims is None:
 elif len(dims) < 2:
     OUT = "Pick at least two parallel dimension strings."
 else:
-    removed = hidden = spaced = leaders = 0
+    removed = hidden = spaced = leaders = renamed = 0
     TransactionManager.Instance.EnsureInTransaction(doc)
     for dim in dims:
         if turn_off_leader(dim):
@@ -502,6 +559,8 @@ else:
             if n:
                 doc.Regenerate()
         if REMOVE_DUPES:
+            # Names first: the inner copies are about to be removed.
+            renamed += merge_room_names(g, view)
             plan = plan_duplicate_removal(g, view)
             if plan is None:
                 report.append("Couldn't tell which side the building is on - "
@@ -530,8 +589,9 @@ else:
     report.insert(0, "{0} dimension(s) picked, {1} row(s) of strings moved, "
                      "{2} duplicate segment(s) removed, "
                      "{3} repeated wall value(s) hidden, "
-                     "{4} leader(s) turned off."
-                  .format(len(dims), spaced, removed, hidden, leaders))
+                     "{4} room name(s) combined, "
+                     "{5} leader(s) turned off."
+                  .format(len(dims), spaced, removed, hidden, renamed, leaders))
     OUT = "\n".join(report)
 
 rearm_for_next_run()

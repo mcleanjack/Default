@@ -3,7 +3,7 @@
 Tidies parallel dimension strings:
 - Unticks **Leader** on every picked string, and on any string the script rebuilds.
 - Spaces the strings evenly, 600 mm apart by default.
-- When the same segment (for example 4180 LIVING) appears in more than one picked string, keeps it only in the string furthest from the building and removes it from the others.
+- When the same segment (for example 4180 LIVING) appears in more than one picked string, keeps it only in the string furthest from the building and removes it from the others. If the copies have different room names, the kept copy gets them all, innermost first (for example `FAMILY - MEALS`).
 - Repeated walls (90 and 240 mm by default) stay on every string, but their number is hidden on the inner strings.
 
 The script does not connect the strings' witness lines. Revit's API can't lengthen individual witness lines, so drag them by hand where you want them to join.
@@ -22,7 +22,7 @@ The script does not connect the strings' witness lines. Revit's API can't length
 | Input | Default | Meaning |
 |---|---|---|
 | Remove Duplicate Segments | `true` | Removes repeated segments from strings closer to the building, and hides repeated wall numbers. |
-| Max Wall Thickness (mm) | `240` | Repeats this long or shorter count as walls: they stay on every string, with their number hidden except on the string furthest from the building. Longer repeats (rooms) are removed. A wall left with no room either side after the removal is deleted. Set it to 90 to remove repeated 240 walls instead of hiding them. |
+| Max Wall Thickness (mm) | `240` | Repeats this long or shorter count as walls: they stay on every string, with their number hidden except on the string furthest from the building. Longer repeats (rooms) are removed. A 90 mm wall left with no room either side after the removal is deleted; a lone thicker wall, such as a 240, is kept. Set it to 90 to remove repeated 240 walls instead of hiding them. |
 | String Spacing (mm) | `600` | Moves the strings so each is this far (model size) from the one inside it. The string closest to the building stays put. 0 leaves them where they are. |
 
 ## Order of steps
