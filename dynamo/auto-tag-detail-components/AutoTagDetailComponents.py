@@ -5,12 +5,12 @@ Auto Tag Detail Components  (Dynamo Python node)
 Workflow
   1. Draw a vertical detail line in the active view where the tag text should align.
   2. Run the graph (Dynamo Player recommended).
-  3. Pick the tag type in the dialog.
+  3. Pick the side of the line in the dialog.
   4. Click the guide line.
   5. Click each detail component to tag, on the exact spot the arrow should land.
      Press D (Description tag) or C (Comments tag) at any time to switch the tag
      used for the following clicks - a notice briefly shows the selected tag.
-     The tag picked in the dialog sets the side of the line and the starting tag.
+     Picking starts with the Description tag; the dialog only sets the side.
      Picked components turn blue until you click Finish.
      Press ESC (or right-click > Cancel) when finished.
   6. Tags are created with their text aligned to the guide line, and the
@@ -168,7 +168,7 @@ def show_dialog(available, defaults, status=""):
     form.MinimizeBox = False
     form.StartPosition = FormStartPosition.CenterScreen
     form.TopMost = True
-    form.ClientSize = Size(380, 320)
+    form.ClientSize = Size(380, 228)
 
     def group(text, y, height):
         g = GroupBox()
@@ -178,41 +178,29 @@ def show_dialog(available, defaults, status=""):
         form.Controls.Add(g)
         return g
 
-    def label(parent, text, y):
-        lbl = Label()
-        lbl.Text = text
-        lbl.AutoSize = True
-        lbl.Location = Point(12, y)
-        parent.Controls.Add(lbl)
-
     def radio(parent, text, y, checked, enabled=True):
         rb = RadioButton()
         rb.Text = text
         rb.AutoSize = True
-        rb.Location = Point(24, y)
+        rb.Location = Point(16, y)
         rb.Enabled = enabled
         rb.Checked = checked and enabled
         parent.Controls.Add(rb)
         return rb
 
-    # Tag type
-    g_tag = group("Side of line + starting tag (press D / C while picking to switch)", 10, 175)
-    tag_radios = []
-    y = 22
-    for side, heading in (("left", "LEFT of line (text aligned right)"),
-                          ("right", "RIGHT of line (text aligned left)")):
-        label(g_tag, heading, y)
-        y += 22
-        for name, s in TAG_OPTIONS:
-            if s != side:
-                continue
-            ok = name in available
-            text = name if ok else name + "  (not loaded)"
-            tag_radios.append((name, radio(g_tag, text, y, defaults.get("tag") == name, ok)))
-            y += 24
-        y += 6
-    if not any(rb.Checked for _n, rb in tag_radios):
-        for _n, rb in tag_radios:
+    # Side of the line - the tag itself is chosen with D / C while picking
+    default_side = defaults.get("side") or dict(TAG_OPTIONS).get(defaults.get("tag"), "left")
+    g_side = group("Side of line (press D / C while picking to switch tag)", 10, 82)
+    side_radios = []
+    y = 24
+    for side, text in (("left", "LEFT of line (text aligned right)"),
+                       ("right", "RIGHT of line (text aligned left)")):
+        ok = any(name in available for _k, name in TAG_SHORTCUTS[side])
+        side_radios.append((side, radio(g_side, text if ok else text + "  (tags not loaded)",
+                                        y, side == default_side, ok)))
+        y += 26
+    if not any(rb.Checked for _s, rb in side_radios):
+        for _s, rb in side_radios:
             if rb.Enabled:
                 rb.Checked = True
                 break
@@ -220,21 +208,21 @@ def show_dialog(available, defaults, status=""):
     cb_delete = CheckBox()
     cb_delete.Text = "Delete guide line after tagging"
     cb_delete.AutoSize = True
-    cb_delete.Location = Point(18, 196)
+    cb_delete.Location = Point(18, 104)
     cb_delete.Checked = bool(defaults.get("delete_line", False))
     form.Controls.Add(cb_delete)
 
     status_lbl = Label()
     status_lbl.Text = status
     status_lbl.UseMnemonic = False      # show "&" literally
-    status_lbl.Location = Point(18, 222)
+    status_lbl.Location = Point(18, 130)
     status_lbl.Size = Size(350, 48)
     form.Controls.Add(status_lbl)
 
     ok_btn = Button()
     ok_btn.Text = "Pick line && tag"
     ok_btn.Size = Size(120, 30)
-    ok_btn.Location = Point(116, 276)
+    ok_btn.Location = Point(116, 184)
     ok_btn.DialogResult = DialogResult.OK
     form.Controls.Add(ok_btn)
     form.AcceptButton = ok_btn
@@ -242,7 +230,7 @@ def show_dialog(available, defaults, status=""):
     cancel_btn = Button()
     cancel_btn.Text = "Finish"
     cancel_btn.Size = Size(120, 30)
-    cancel_btn.Location = Point(248, 276)
+    cancel_btn.Location = Point(248, 184)
     cancel_btn.DialogResult = DialogResult.Cancel
     form.Controls.Add(cancel_btn)
     form.CancelButton = cancel_btn
@@ -250,11 +238,11 @@ def show_dialog(available, defaults, status=""):
     result = form.ShowDialog()
     if result != DialogResult.OK:
         return None
-    chosen = [n for n, rb in tag_radios if rb.Checked]
+    chosen = [sd for sd, rb in side_radios if rb.Checked]
     if not chosen:
         return None
     return {
-        "tag": chosen[0],
+        "side": chosen[0],
         "delete_line": bool(cb_delete.Checked),
     }
 
@@ -543,7 +531,9 @@ def clear_highlights():
 # ---------------------------------------------------------------------------
 def tag_batch(options, tag_types):
     """Pick a guide line + components and tag them. Returns (status, tags, errors)."""
-    side = dict(TAG_OPTIONS)[options["tag"]]
+    side = options["side"]
+    # Start on the first loaded shortcut tag (Description), switch with D / C
+    start_name = [n for _k, n in TAG_SHORTCUTS[side] if n in tag_types][0]
 
     # 1. Guide line
     try:
@@ -564,7 +554,7 @@ def tag_batch(options, tag_types):
 
     # 2. Components - click each one; press D or C at any time to switch tag; ESC to finish
     picks = []
-    start_key_watch(side, tag_types, options["tag"])
+    start_key_watch(side, tag_types, start_name)
     try:
         while True:
             prompt = "[{0}] Click component #{1} where the arrow should land  (D = Description, C = Comments, ESC = finish)".format(
