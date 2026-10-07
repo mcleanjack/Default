@@ -28,6 +28,12 @@ Requires Revit 2022+ with Dynamo 2.12+ (CPython3 engine). It also runs on the Ir
 
 The tags are created as Free End leaders, with the tag head on the guide line. A tag type that isn't loaded in the project is greyed out in the dialog. Your last choices are remembered.
 
+6. **The dialog comes back** after every batch, so you can keep going: draw another line, pick another tag type or side, and tag again. Click **Finish** when you're done. Each batch is committed straight away and is its own undo step (Ctrl+Z).
+
+To start the script again after clicking Finish:
+- **Dynamo Player**: press Run. The script runs every time.
+- **Dynamo editor**: Dynamo doesn't re-run a node whose inputs haven't changed. Toggle **Run** to False and back to True, then click Run.
+
 ## Inputs (exposed in Dynamo Player)
 
 | Input | Default | Meaning |

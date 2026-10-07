@@ -9,7 +9,10 @@ Workflow
   4. Click the guide line.
   5. Click each detail component to tag, on the exact spot the arrow should land.
      Press ESC (or right-click > Cancel) when finished.
-  6. Tags are created with their text aligned to the guide line.
+  6. Tags are created with their text aligned to the guide line, and the
+     dialog comes back so you can tag the next set (new line, other tag type,
+     other side...). Click Finish when you're done. Each set is a separate
+     undo step (Ctrl+Z).
 
 Inputs
   IN[0]  Run                            (bool)   False = do nothing
@@ -31,7 +34,8 @@ clr.AddReference("System.Drawing")
 
 from Autodesk.Revit.DB import (
     BuiltInCategory, BuiltInParameter, ElementId, FilteredElementCollector,
-    IndependentTag, LeaderEndCondition, Reference, TagMode, TagOrientation, XYZ,
+    IndependentTag, LeaderEndCondition, Reference, TagMode, TagOrientation,
+    Transaction, XYZ,
 )
 from Autodesk.Revit.UI.Selection import ISelectionFilter, ObjectType
 import Autodesk.Revit.Exceptions as RvtExc
@@ -137,7 +141,7 @@ def save_settings(settings):
 # ---------------------------------------------------------------------------
 # Dialog
 # ---------------------------------------------------------------------------
-def show_dialog(available, defaults):
+def show_dialog(available, defaults, status=""):
     form = Form()
     form.Text = "Auto Tag Detail Components"
     form.FormBorderStyle = FormBorderStyle.FixedDialog
@@ -145,7 +149,7 @@ def show_dialog(available, defaults):
     form.MinimizeBox = False
     form.StartPosition = FormStartPosition.CenterScreen
     form.TopMost = True
-    form.ClientSize = Size(380, 470)
+    form.ClientSize = Size(380, 510)
 
     def group(text, y, height):
         g = GroupBox()
@@ -213,18 +217,24 @@ def show_dialog(available, defaults):
     cb_delete.Checked = bool(defaults.get("delete_line", False))
     form.Controls.Add(cb_delete)
 
+    status_lbl = Label()
+    status_lbl.Text = status
+    status_lbl.Location = Point(18, 404)
+    status_lbl.Size = Size(350, 48)
+    form.Controls.Add(status_lbl)
+
     ok_btn = Button()
     ok_btn.Text = "Pick line && tag"
     ok_btn.Size = Size(120, 30)
-    ok_btn.Location = Point(116, 422)
+    ok_btn.Location = Point(116, 464)
     ok_btn.DialogResult = DialogResult.OK
     form.Controls.Add(ok_btn)
     form.AcceptButton = ok_btn
 
     cancel_btn = Button()
-    cancel_btn.Text = "Cancel"
+    cancel_btn.Text = "Finish"
     cancel_btn.Size = Size(120, 30)
-    cancel_btn.Location = Point(248, 422)
+    cancel_btn.Location = Point(248, 464)
     cancel_btn.DialogResult = DialogResult.Cancel
     form.Controls.Add(cancel_btn)
     form.CancelButton = cancel_btn
@@ -350,20 +360,8 @@ def create_tag(type_id, ref, head):
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
-def main():
-    if not run:
-        return ["Set Run to True to start."], []
-
-    tag_types = find_tag_types()
-    if not tag_types:
-        return ["None of the tag types were found in this project: "
-                + ", ".join(n for n, _s in TAG_OPTIONS)], []
-
-    options = show_dialog(tag_types, load_settings())
-    if options is None:
-        return ["Cancelled."], []
-    save_settings(options)
-
+def tag_batch(options, tag_types):
+    """Pick a guide line + components and tag them. Returns (status, tags, errors)."""
     side = dict(TAG_OPTIONS)[options["tag"]]
     type_id = tag_types[options["tag"]]
 
@@ -371,16 +369,16 @@ def main():
     try:
         line_ref = uidoc.Selection.PickObject(
             ObjectType.Element, GuideLineFilter(),
-            "Select the vertical guide line (ESC to cancel)")
+            "Select the vertical guide line (ESC to go back)")
     except RvtExc.OperationCanceledException:
-        return ["Cancelled - no guide line picked."], []
+        return "No guide line picked.", [], []
     line_elem = impl(doc.GetElement(line_ref))
     curve = line_elem.GeometryCurve
     p0, p1 = curve.GetEndPoint(0), curve.GetEndPoint(1)
     u0, v0 = to_uv(p0)
     u1, v1 = to_uv(p1)
     if abs(u1 - u0) > abs(v1 - v0):
-        return ["The guide line must be vertical (it looks horizontal)."], []
+        return "The guide line must be vertical (it looks horizontal).", [], []
     line_u = (u0 + u1) / 2.0
     top, bottom = max(v0, v1), min(v0, v1)
     depth = p0.Subtract(V_ORIGIN).DotProduct(V_NORMAL)
@@ -397,7 +395,7 @@ def main():
         u, v = to_uv(pick_point_of(ref, elem))
         picks.append((v, u, elem))
     if not picks:
-        return ["No components picked."], []
+        return "No components picked.", [], []
 
     # 3. Tag head positions (top-down order)
     picks.sort(key=lambda t: -t[0])
@@ -411,32 +409,69 @@ def main():
         heads_v = level_heights(picked_vs, gap)
     head_u = line_u - offset if side == "left" else line_u + offset
 
-    # 4. Create tags
-    created, messages = [], []
-    TransactionManager.Instance.EnsureInTransaction(doc)
-    for (end_v, end_u, elem), hv in zip(picks, heads_v):
-        try:
-            ref = Reference(elem)
-            head = to_xyz(head_u, hv, depth)
-            end = to_xyz(end_u, end_v, depth)
-            tag = create_tag(type_id, ref, head)
-            if options["leader"] == "elbow" and abs(hv - end_v) > TOL and abs(end_u - head_u) > TOL:
-                elbow = to_xyz(end_u, hv, depth)            # horizontal, then vertical
-            else:
-                elbow = to_xyz((head_u + end_u) / 2.0, (hv + end_v) / 2.0, depth)  # straight
-            set_leader(tag, ref, end, elbow)
-            tag.TagHeadPosition = head
-            created.append(tag)
-        except Exception as ex:
-            messages.append("Could not tag element {0}: {1}".format(elem.Id, ex))
-    if options["delete_line"] and created:
-        doc.Delete(line_elem.Id)
-    TransactionManager.Instance.TransactionTaskDone()
+    # 4. Create tags - committed per batch so they show up (and undo) straight away
+    created, errors = [], []
+    t = Transaction(doc, "Auto Tag Detail Components")
+    t.Start()
+    try:
+        for (end_v, end_u, elem), hv in zip(picks, heads_v):
+            try:
+                ref = Reference(elem)
+                head = to_xyz(head_u, hv, depth)
+                end = to_xyz(end_u, end_v, depth)
+                tag = create_tag(type_id, ref, head)
+                if options["leader"] == "elbow" and abs(hv - end_v) > TOL and abs(end_u - head_u) > TOL:
+                    elbow = to_xyz(end_u, hv, depth)            # horizontal, then vertical
+                else:
+                    elbow = to_xyz((head_u + end_u) / 2.0, (hv + end_v) / 2.0, depth)  # straight
+                set_leader(tag, ref, end, elbow)
+                tag.TagHeadPosition = head
+                created.append(tag)
+            except Exception as ex:
+                errors.append("Could not tag element {0}: {1}".format(elem.Id, ex))
+        if options["delete_line"] and created:
+            doc.Delete(line_elem.Id)
+        t.Commit()
+    except Exception:
+        if t.HasStarted() and not t.HasEnded():
+            t.RollBack()
+        raise
+    uidoc.RefreshActiveView()
 
-    messages.insert(0, "Created {0} '{1}' tag(s) with {2} leaders.".format(
+    status = "Last run: created {0} '{1}' tag(s) with {2} leaders.".format(
         len(created), options["tag"],
-        "right-angle" if options["leader"] == "elbow" else "straight"))
-    return messages, created
+        "right-angle" if options["leader"] == "elbow" else "straight")
+    if errors:
+        status += " {0} failed (see Dynamo output).".format(len(errors))
+    return status, created, errors
+
+
+def main():
+    if not run:
+        return ["Set Run to True to start."], []
+
+    tag_types = find_tag_types()
+    if not tag_types:
+        return ["None of the tag types were found in this project: "
+                + ", ".join(n for n, _s in TAG_OPTIONS)], []
+
+    # Close Dynamo's own transaction so each batch can commit on its own.
+    TransactionManager.Instance.ForceCloseTransaction()
+
+    all_tags, messages = [], []
+    status = "Draw a vertical detail line, then click 'Pick line & tag'."
+    options = load_settings()
+    while True:
+        options = show_dialog(tag_types, options, status)
+        if options is None:
+            break
+        save_settings(options)
+        status, created, errors = tag_batch(options, tag_types)
+        all_tags.extend(created)
+        messages.extend(errors)
+
+    messages.insert(0, "Finished: created {0} tag(s) in total.".format(len(all_tags)))
+    return messages, all_tags
 
 
 OUT = main()
