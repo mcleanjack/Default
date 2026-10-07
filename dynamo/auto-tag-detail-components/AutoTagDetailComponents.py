@@ -69,7 +69,6 @@ TAG_CATEGORIES = [BuiltInCategory.OST_MultiCategoryTags,
 SETTINGS_FILE = os.path.join(os.environ.get("TEMP", os.path.expanduser("~")),
                              "AutoTagDetailComponents.json")
 MM_TO_FT = 1.0 / 304.8
-STRAIGHT_STUB_MM = 0.5   # straight leaders: elbow distance from the arrow end (mm on sheet)
 TOL = 1e-6
 
 
@@ -203,13 +202,19 @@ def show_dialog(available, defaults, status=""):
     g_leader = group("Leader", 195, 80)
     elbow_default = defaults.get("leader", "elbow") == "elbow"
     rb_elbow = radio(g_leader, "Right-angle bend (horizontal, then vertical)", 22, elbow_default)
-    rb_straight = radio(g_leader, "Straight leader", 46, not elbow_default)
+    rb_straight = radio(g_leader, "Straight horizontal (tag level with each click)", 46, not elbow_default)
 
     # Placement
     g_place = group("Tag height", 285, 80)
     spread_default = defaults.get("placement") == "spread"
     rb_level = radio(g_place, "Level with each picked point", 22, not spread_default)
     rb_spread = radio(g_place, "Spread evenly along the guide line", 46, spread_default)
+
+    def sync_placement(sender=None, args=None):
+        # Straight leaders are always horizontal, so tags stay level with each click.
+        g_place.Enabled = rb_elbow.Checked
+    rb_elbow.CheckedChanged += sync_placement
+    sync_placement()
 
     cb_delete = CheckBox()
     cb_delete.Text = "Delete guide line after tagging"
@@ -347,15 +352,26 @@ def set_leader(tag, ref, end, elbow):
 
 
 def create_tag(type_id, ref, head):
+    """Create the tag WITHOUT a leader so its text box can be measured."""
     try:
-        tag = IndependentTag.Create(doc, type_id, view.Id, ref, True,
+        tag = IndependentTag.Create(doc, type_id, view.Id, ref, False,
                                     TagOrientation.Horizontal, head)
     except TypeError:
-        tag = IndependentTag.Create(doc, view.Id, ref, True,
+        tag = IndependentTag.Create(doc, view.Id, ref, False,
                                     TagMode.TM_ADDBY_MULTICATEGORY,
                                     TagOrientation.Horizontal, head)
         tag.ChangeTypeId(type_id)
     return tag
+
+
+def text_centre_v(tag):
+    """Vertical centre of the tag text in view coordinates (Revit starts the
+    leader at the middle of the text, not at the tag head point)."""
+    doc.Regenerate()
+    bb = tag.get_BoundingBox(view)
+    if bb is None:
+        return None
+    return to_uv(bb.Min.Add(bb.Max).Multiply(0.5))[1]
 
 
 # ---------------------------------------------------------------------------
@@ -404,7 +420,9 @@ def tag_batch(options, tag_types):
     gap = spacing_mm * MM_TO_FT * scale
     offset = offset_mm * MM_TO_FT * scale
     picked_vs = [p[0] for p in picks]
-    if options["placement"] == "spread":
+    if options["leader"] == "straight":
+        heads_v = picked_vs                     # level with each click -> horizontal leader
+    elif options["placement"] == "spread":
         heads_v = spread_heights(picked_vs, top, bottom)
     else:
         heads_v = level_heights(picked_vs, gap)
@@ -418,20 +436,19 @@ def tag_batch(options, tag_types):
         for (end_v, end_u, elem), hv in zip(picks, heads_v):
             try:
                 ref = Reference(elem)
-                head = to_xyz(head_u, hv, depth)
                 end = to_xyz(end_u, end_v, depth)
-                tag = create_tag(type_id, ref, head)
+                # hv is where the leader should leave the text. Place the tag,
+                # measure its text, then shift it so the text centre sits on hv.
+                tag = create_tag(type_id, ref, to_xyz(head_u, hv, depth))
+                centre_v = text_centre_v(tag)
+                head_v = hv + (hv - centre_v) if centre_v is not None else hv
+                head = to_xyz(head_u, head_v, depth)
+                tag.TagHeadPosition = head
+                tag.HasLeader = True
                 if options["leader"] == "elbow" and abs(hv - end_v) > TOL and abs(end_u - head_u) > TOL:
                     elbow = to_xyz(end_u, hv, depth)            # horizontal, then vertical
                 else:
-                    # Straight: Revit starts the leader at the text edge, not at the
-                    # tag head, so a mid-point elbow shows a kink. Put the elbow a
-                    # tiny stub away from the arrow end so the visible leader is one
-                    # straight run from the text to the component.
-                    du, dv = head_u - end_u, hv - end_v
-                    dist = (du * du + dv * dv) ** 0.5
-                    k = min(0.5, STRAIGHT_STUB_MM * MM_TO_FT * scale / dist) if dist > TOL else 0.5
-                    elbow = to_xyz(end_u + du * k, end_v + dv * k, depth)
+                    elbow = to_xyz((head_u + end_u) / 2.0, hv, depth)  # on the horizontal run
                 set_leader(tag, ref, end, elbow)
                 tag.TagHeadPosition = head
                 created.append(tag)

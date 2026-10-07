@@ -20,7 +20,7 @@ Requires Revit 2022+ with Dynamo 2.12+ (CPython3 engine). It also runs on the Ir
    - **Tag type**
      - Left of the line: `Description Tag Align Right` or `Comments Tag Align Right`
      - Right of the line: `Description Tag` or `Comments Tag`
-   - **Leader**: *Right-angle bend*, which runs horizontally from the text and then vertically to the component, or *Straight*.
+   - **Leader**: *Right-angle bend*, which runs horizontally from the text and then vertically to the component, or *Straight horizontal*, which keeps each tag level with the point you clicked so its leader runs dead horizontal. With *Straight horizontal*, the *Tag height* options are greyed out.
    - **Tag height**: *Level with each picked point*, or *Spread evenly along the guide line* (from the top of the line to the bottom).
    - Optionally, **delete the guide line** after tagging.
 4. Click the guide line.
@@ -44,4 +44,6 @@ To start the script again after clicking Finish, just press **Run** again, in Dy
 
 - The script finds tag types by **type name or family name**, in both Multi-Category Tags and Detail Item Tags. To use different names, edit `TAG_OPTIONS` at the top of the `.py` file, then run `build_dyn.py`.
 - For the text to finish exactly on the line, the label's origin in the "Align Right" families must be at the right edge of the text. In the left-aligned families, it must be at the left edge.
+- Revit starts a leader at the vertical middle of the tag text. The script measures each tag and shifts it so that middle lines up with the leader, which keeps leaders horizontal for one-line and multi-line notes.
+- With *Straight horizontal*, tags are never moved apart, so click components far enough apart vertically that the notes don't overlap.
 - If you choose *Right-angle bend* with *Level with each picked point*, a leader only gets a vertical leg when its tag had to be moved to keep the minimum spacing. Otherwise the leader is a straight horizontal line. To get a right-angle leg on every tag, use *Spread evenly*.
