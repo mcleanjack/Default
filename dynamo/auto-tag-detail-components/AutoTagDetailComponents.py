@@ -9,7 +9,8 @@ Workflow
   4. Click the guide line.
   5. Click each detail component to tag, on the exact spot the arrow should land.
      Press D (Description tag) or C (Comments tag) to switch the tag used for
-     the following clicks - a notice shows the selected tag after the next click.
+     the following clicks - a notice pops up by the cursor as soon as you move
+     over the drawing, then closes itself.
      Picking starts with the Description tag; the dialog only sets the side.
      Picked components turn blue until you click Finish.
      Press ESC (or right-click > Cancel) when finished.
@@ -28,6 +29,7 @@ import clr
 import os
 import json
 import uuid
+import time
 
 clr.AddReference("RevitAPI")
 clr.AddReference("RevitAPIUI")
@@ -59,6 +61,7 @@ try:
     _user32.GetKeyState.restype = ctypes.c_short
     _user32.GetForegroundWindow.restype = ctypes.c_void_p
     _user32.SetForegroundWindow.argtypes = [ctypes.c_void_p]
+    _user32.ShowWindow.argtypes = [ctypes.c_void_p, ctypes.c_int]
 except Exception:
     _user32 = None
 
@@ -248,14 +251,16 @@ def show_dialog(available, defaults, status=""):
 
 # ---------------------------------------------------------------------------
 # D / C shortcut keys while picking components
-# No timers or windows run while Revit is waiting for a click (that froze
+# No background timer runs while Revit is waiting for a click (that froze
 # picking). Instead the keyboard is checked from the pick filter - which Revit
-# calls as the cursor moves over components - and between clicks. A press is
-# detected from the key's toggle bit, which flips on every key press.
+# calls constantly as the cursor moves over components - and between clicks.
+# A press is detected from the key's toggle bit, which flips on every press.
+# The notice is shown without taking focus from Revit and closes itself.
 # ---------------------------------------------------------------------------
 VK_CODES = {"D": 0x44, "C": 0x43}
+NOTICE_SECONDS = 1.5              # how long the "Tag selected" notice stays up
 _watch = {"side": None, "current": None, "available": {}, "toggle": {},
-          "notified": None, "notice": None}
+          "notice": None, "notice_time": 0.0}
 
 
 def _key_bits(key):
@@ -267,21 +272,27 @@ def _key_bits(key):
 
 
 def check_shortcuts():
-    """Switch the current tag if D or C was pressed. Never opens a window."""
+    """Switch the current tag if D or C was pressed and show the notice.
+    Also closes the notice once NOTICE_SECONDS have passed."""
     side = _watch["side"]
     if side is None:
         return
+    if _watch["notice"] is not None and time.time() - _watch["notice_time"] > NOTICE_SECONDS:
+        close_notice()
     for key, name in TAG_SHORTCUTS[side]:
-        held, toggle = _key_bits(key)
-        pressed = held or (toggle is not None and toggle != _watch["toggle"].get(key))
+        toggle = _key_bits(key)[1]
+        pressed = toggle is not None and toggle != _watch["toggle"].get(key)
         _watch["toggle"][key] = toggle
-        if pressed and name in _watch["available"]:
-            _watch["current"] = name
+        if pressed and name != _watch["current"]:
+            if name in _watch["available"]:
+                _watch["current"] = name
+                show_notice("Tag selected: " + name)
+            else:
+                show_notice(name + " is not loaded")
 
 
 def start_key_watch(side, available, start_name):
     _watch.update(side=side, current=start_name, available=available,
-                  notified=start_name,
                   toggle=dict((k, _key_bits(k)[1]) for k in VK_CODES))
 
 
@@ -296,11 +307,29 @@ def close_notice():
         _watch["notice"] = None
 
 
+def _show_without_focus(f):
+    """Show a form WITHOUT activating it, so Revit keeps keyboard focus and the
+    pick carries on. Returns False if that isn't possible here."""
+    if _user32 is None:
+        return False
+    try:
+        from System.Reflection import BindingFlags
+        from System.Windows.Forms import Control
+        from System import Array, Object
+        flags = BindingFlags.Instance | BindingFlags.NonPublic
+        for m in clr.GetClrType(Control).GetMethods(flags):
+            if m.Name == "CreateControl" and len(m.GetParameters()) == 1:
+                m.Invoke(f, Array[Object]([True]))      # create window + label
+                break
+        _user32.ShowWindow(f.Handle.ToInt64(), 4)       # SW_SHOWNOACTIVATE
+        return True
+    except Exception:
+        return False
+
+
 def show_notice(text):
-    """Small notice by the cursor. Shown between clicks only; it closes on the
-    next click (or when picking ends)."""
+    """Small notice by the cursor that closes itself after NOTICE_SECONDS."""
     close_notice()
-    previous = _user32.GetForegroundWindow() if _user32 is not None else None
     f = Form()
     f.FormBorderStyle = getattr(FormBorderStyle, "None")
     f.StartPosition = FormStartPosition.Manual
@@ -318,13 +347,16 @@ def show_notice(text):
     f.ClientSize = Size(lbl.PreferredWidth + 20, lbl.PreferredHeight + 16)
     pos = Cursor.Position
     f.Location = Point(pos.X + 20, pos.Y + 20)
-    f.Show()
-    if previous:
-        try:
-            _user32.SetForegroundWindow(previous)   # keep Revit active for picking
-        except Exception:
-            pass
+    if not _show_without_focus(f):
+        previous = _user32.GetForegroundWindow() if _user32 is not None else None
+        f.Show()
+        if previous:
+            try:
+                _user32.SetForegroundWindow(previous)   # keep Revit active for picking
+            except Exception:
+                pass
     _watch["notice"] = f
+    _watch["notice_time"] = time.time()
 
 
 def stop_key_watch():
@@ -542,15 +574,11 @@ def tag_batch(options, tag_types):
                 ref = uidoc.Selection.PickObject(ObjectType.Element, DetailItemFilter(), prompt)
             except RvtExc.OperationCanceledException:
                 break
-            close_notice()
             check_shortcuts()
             elem = doc.GetElement(ref)
             u, v = to_uv(pick_point_of(ref, elem))
             picks.append((v, u, elem, _watch["current"]))
             highlight(elem)
-            if _watch["current"] != _watch["notified"]:
-                _watch["notified"] = _watch["current"]
-                show_notice("Tag selected: " + _watch["current"])
     finally:
         stop_key_watch()
     if not picks:
