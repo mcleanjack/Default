@@ -8,7 +8,6 @@ Workflow
   3. Pick the side of the line in the dialog.
   4. Click the guide line.
   5. Click each detail component to tag, on the exact spot the arrow should land.
-     Finish with the green Finish button over the view, or ESC.
      Press D (Description tag) or C (Comments tag) at any time to switch the tag
      used for the following clicks - a notice briefly shows the selected tag.
      Picking starts with the Description tag; the dialog only sets the side.
@@ -48,8 +47,8 @@ from RevitServices.Persistence import DocumentManager
 from RevitServices.Transactions import TransactionManager
 
 from System.Windows.Forms import (
-    Button, CheckBox, Cursor, DialogResult, DockStyle, FlatStyle, Form,
-    FormBorderStyle, FormStartPosition, GroupBox, Label, Padding, RadioButton,
+    Button, CheckBox, Cursor, DialogResult, Form, FormBorderStyle,
+    FormStartPosition, GroupBox, Label, Padding, RadioButton,
 )
 from System.Drawing import Point, Size, Font, FontStyle
 from System.Drawing import Color as DrawColor
@@ -356,78 +355,6 @@ def stop_key_watch():
         t.Dispose()
         _watch["timer"] = None
     close_notice()
-    close_finish_panel()
-
-
-# ---------------------------------------------------------------------------
-# Green tick "Finish" button floating over the view while picking.
-# Revit's own options-bar tick only exists in multi-select mode, which can't
-# report where each component was clicked - so this button simply presses ESC
-# for you, which ends picking exactly like pressing ESC yourself.
-# ---------------------------------------------------------------------------
-def _press_escape():
-    if _user32 is None:
-        return
-    try:
-        hwnd = DocumentManager.Instance.CurrentUIApplication.MainWindowHandle
-        _user32.SetForegroundWindow(hwnd.ToInt64())
-    except Exception:
-        pass
-    _user32.keybd_event(0x1B, 0, 0, 0)          # ESC down
-    _user32.keybd_event(0x1B, 0, 2, 0)          # ESC up
-
-
-def _on_finish_click(sender, args):
-    _press_escape()
-
-
-def show_finish_panel():
-    close_finish_panel()
-    if _user32 is None:
-        return                                  # can't press ESC for you - use ESC
-    previous = _user32.GetForegroundWindow()
-    location = None
-    try:
-        for uv in uidoc.GetOpenUIViews():
-            if uv.ViewId.Equals(view.Id):
-                r = uv.GetWindowRectangle()
-                location = Point(r.Left + 12, r.Top + 12)
-    except Exception:
-        pass
-    if location is None:
-        pos = Cursor.Position
-        location = Point(pos.X + 20, pos.Y - 60)
-
-    f = Form()
-    f.FormBorderStyle = getattr(FormBorderStyle, "None")
-    f.StartPosition = FormStartPosition.Manual
-    f.Location = location
-    f.TopMost = True
-    f.ShowInTaskbar = False
-    f.ClientSize = Size(130, 40)
-    b = Button()
-    b.Text = u"\u2714  Finish"
-    b.Dock = DockStyle.Fill
-    b.FlatStyle = FlatStyle.Flat
-    b.BackColor = DrawColor.FromArgb(46, 160, 67)
-    b.ForeColor = DrawColor.White
-    b.Font = Font("Segoe UI", 11.0, FontStyle.Bold)
-    b.Click += _on_finish_click
-    f.Controls.Add(b)
-    f.Show()
-    try:
-        _user32.SetForegroundWindow(previous)   # keep Revit active for picking
-    except Exception:
-        pass
-    _watch["panel"] = f
-
-
-def close_finish_panel():
-    f = _watch.get("panel")
-    if f is not None:
-        f.Close()
-        f.Dispose()
-        _watch["panel"] = None
 
 
 # ---------------------------------------------------------------------------
@@ -628,10 +555,9 @@ def tag_batch(options, tag_types):
     # 2. Components - click each one; press D or C at any time to switch tag; ESC to finish
     picks = []
     start_key_watch(side, tag_types, start_name)
-    show_finish_panel()
     try:
         while True:
-            prompt = "[{0}] Click component #{1} where the arrow should land  (D = Description, C = Comments, green Finish button or ESC = finish)".format(
+            prompt = "[{0}] Click component #{1} where the arrow should land  (D = Description, C = Comments, ESC = finish)".format(
                 _watch["current"], len(picks) + 1)
             try:
                 ref = uidoc.Selection.PickObject(ObjectType.Element, DetailItemFilter(), prompt)

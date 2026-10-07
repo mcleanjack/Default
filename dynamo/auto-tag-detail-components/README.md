@@ -20,7 +20,7 @@ Requires Revit 2022+ with Dynamo 2.12+ (CPython3 engine). It also runs on the Ir
    - **Side of line**: *LEFT of line (text aligned right)* uses the `... Align Right` tags. *RIGHT of line (text aligned left)* uses `Description Tag` and `Comments Tag`.
    - Optionally, **delete the guide line** after tagging.
 4. Click the guide line.
-5. Click each detail component **on the exact spot where the arrow should land**. You can press **D** (Description tag) or **C** (Comments tag) at any time, and the tag you choose is used for every click after that. When you switch, a small blue notice such as "Tag selected: Comments Tag" appears by the cursor for about 1.5 seconds. No popup appears between clicks. Picking always starts with the Description tag. To finish picking, click the **green ✔ Finish** button in the top-left corner of the view, or press **ESC**. The button just presses ESC for you. Each picked component turns blue until you click **Finish**.
+5. Click each detail component **on the exact spot where the arrow should land**. You can press **D** (Description tag) or **C** (Comments tag) at any time, and the tag you choose is used for every click after that. When you switch, a small blue notice such as "Tag selected: Comments Tag" appears by the cursor for about 1.5 seconds. No popup appears between clicks. Picking always starts with the Description tag. Press **ESC** to finish picking. Each picked component turns blue until you click **Finish**.
 
 Each tag sits level with the point you clicked, with a straight horizontal Free End leader running from its text to that point. The text edge sits on the guide line. A side whose tags aren't loaded in the project is greyed out in the dialog. Your last choices are remembered.
 
