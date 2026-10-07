@@ -7,7 +7,9 @@ Workflow
   2. Run the graph (Dynamo Player recommended).
   3. Pick the tag type in the dialog.
   4. Click the guide line.
-  5. Click each detail component to tag, on the exact spot the arrow should land.
+  5. Click each detail component to tag, on the exact spot the arrow should land,
+     then press D (Description tag) or C (Comments tag) in the popup.
+     The tag picked in the dialog sets the side of the line and the default.
      Picked components turn blue until you click Finish.
      Press ESC (or right-click > Cancel) when finished.
   6. Tags are created with their text aligned to the guide line, and the
@@ -44,8 +46,8 @@ from RevitServices.Persistence import DocumentManager
 from RevitServices.Transactions import TransactionManager
 
 from System.Windows.Forms import (
-    Button, CheckBox, DialogResult, Form, FormBorderStyle, FormStartPosition,
-    GroupBox, Label, RadioButton,
+    Button, CheckBox, Cursor, DialogResult, Form, FormBorderStyle,
+    FormStartPosition, GroupBox, Label, RadioButton,
 )
 from System.Drawing import Point, Size
 
@@ -64,6 +66,12 @@ TAG_OPTIONS = [
     ("Description Tag", "right"),
     ("Comments Tag", "right"),
 ]
+# Shortcut keys pressed after each component click: D = Description, C = Comments.
+# The side (left/right of the line) comes from the tag chosen in the main dialog.
+TAG_SHORTCUTS = {
+    "left": [("D", "Description Tag Align Right"), ("C", "Comments Tag Align Right")],
+    "right": [("D", "Description Tag"), ("C", "Comments Tag")],
+}
 TAG_CATEGORIES = [BuiltInCategory.OST_MultiCategoryTags,
                   BuiltInCategory.OST_DetailComponentTags]
 SETTINGS_FILE = os.path.join(os.environ.get("TEMP", os.path.expanduser("~")),
@@ -176,7 +184,7 @@ def show_dialog(available, defaults, status=""):
         return rb
 
     # Tag type
-    g_tag = group("Tag type", 10, 175)
+    g_tag = group("Side of line + default tag (press D / C while picking to switch)", 10, 175)
     tag_radios = []
     y = 22
     for side, heading in (("left", "LEFT of line (text aligned right)"),
@@ -237,6 +245,61 @@ def show_dialog(available, defaults, status=""):
         "tag": chosen[0],
         "delete_line": bool(cb_delete.Checked),
     }
+
+
+def ask_tag_shortcut(side, available, last_name, number):
+    """Small popup next to the cursor after each component click.
+    Press D or C (button mnemonics work without Alt), Enter repeats the last
+    choice, Esc stops picking. Returns the tag name, or None for Esc."""
+    form = Form()
+    form.Text = "Tag component #{0}".format(number)
+    form.FormBorderStyle = FormBorderStyle.FixedToolWindow
+    form.StartPosition = FormStartPosition.Manual
+    pos = Cursor.Position
+    form.Location = Point(pos.X + 24, pos.Y + 24)
+    form.TopMost = True
+    form.ShowInTaskbar = False
+    form.ClientSize = Size(330, 92)
+
+    hint = Label()
+    hint.Text = "D = Description    C = Comments    Enter = repeat    Esc = stop"
+    hint.UseMnemonic = False
+    hint.AutoSize = True
+    hint.Location = Point(10, 10)
+    form.Controls.Add(hint)
+
+    buttons = {}
+    results = [DialogResult.Yes, DialogResult.No]
+    for i, (key, name) in enumerate(TAG_SHORTCUTS[side]):
+        btn = Button()
+        # "&D..." underlines the key; pressing it alone clicks the button.
+        btn.Text = "&" + name if name.upper().startswith(key) else "(&" + key + ") " + name
+        btn.Size = Size(155, 40)
+        btn.Location = Point(10 + i * 160, 38)
+        btn.Enabled = name in available
+        btn.DialogResult = results[i]
+        form.Controls.Add(btn)
+        buttons[results[i]] = (name, btn)
+
+    stop = Button()
+    stop.DialogResult = DialogResult.Cancel
+    stop.Size = Size(0, 0)
+    stop.Location = Point(-10, -10)
+    form.Controls.Add(stop)
+    form.CancelButton = stop
+
+    default = None
+    for name, btn in buttons.values():
+        if btn.Enabled and (default is None or name == last_name):
+            default = btn
+    if default is not None:
+        form.AcceptButton = default
+        form.ActiveControl = default
+
+    result = form.ShowDialog()
+    if result in buttons:
+        return buttons[result][0]
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -414,7 +477,6 @@ def clear_highlights():
 def tag_batch(options, tag_types):
     """Pick a guide line + components and tag them. Returns (status, tags, errors)."""
     side = dict(TAG_OPTIONS)[options["tag"]]
-    type_id = tag_types[options["tag"]]
 
     # 1. Guide line
     try:
@@ -433,8 +495,9 @@ def tag_batch(options, tag_types):
     line_u = (u0 + u1) / 2.0
     depth = p0.Subtract(V_ORIGIN).DotProduct(V_NORMAL)
 
-    # 2. Components - one click each, ESC to finish
+    # 2. Components - click each one, then press D or C for its tag; ESC to finish
     picks = []
+    last_name = options["tag"]
     while True:
         prompt = "Click detail component #{0} where the arrow should land (ESC to finish)".format(len(picks) + 1)
         try:
@@ -443,8 +506,12 @@ def tag_batch(options, tag_types):
             break
         elem = doc.GetElement(ref)
         u, v = to_uv(pick_point_of(ref, elem))
-        picks.append((v, u, elem))
+        tag_name = ask_tag_shortcut(side, tag_types, last_name, len(picks) + 1)
+        if tag_name is None:
+            break                       # Esc in the popup = stop picking
         highlight(elem)
+        last_name = tag_name
+        picks.append((v, u, elem, tag_name))
     if not picks:
         return "No components picked.", [], []
 
@@ -458,14 +525,14 @@ def tag_batch(options, tag_types):
     t = Transaction(doc, "Auto Tag Detail Components")
     t.Start()
     try:
-        for end_v, end_u, elem in picks:
+        for end_v, end_u, elem, tag_name in picks:
             hv = end_v
             try:
                 ref = Reference(elem)
                 end = to_xyz(end_u, end_v, depth)
                 # hv is where the leader should leave the text. Place the tag,
                 # measure its text, then shift it so the text centre sits on hv.
-                tag = create_tag(type_id, ref, to_xyz(head_u, hv, depth))
+                tag = create_tag(tag_types[tag_name], ref, to_xyz(head_u, hv, depth))
                 head_v = hv - text_centre_offset(tag, elem, head_u, hv, depth, scale)
                 head = to_xyz(head_u, head_v, depth)
                 tag.TagHeadPosition = head
@@ -485,7 +552,7 @@ def tag_batch(options, tag_types):
         raise
     uidoc.RefreshActiveView()
 
-    status = "Last run: created {0} '{1}' tag(s).".format(len(created), options["tag"])
+    status = "Last run: created {0} tag(s) on the {1} of the line.".format(len(created), side)
     if errors:
         status += " {0} failed (see Dynamo output).".format(len(errors))
     return status, created, errors
@@ -504,7 +571,8 @@ def main():
     TransactionManager.Instance.ForceCloseTransaction()
 
     all_tags, messages = [], []
-    status = "Draw a vertical detail line, then click 'Pick line & tag'."
+    status = ("Draw a vertical detail line, then click 'Pick line & tag'. "
+              "After each component click press D (Description) or C (Comments).")
     options = load_settings()
     try:
         while True:
