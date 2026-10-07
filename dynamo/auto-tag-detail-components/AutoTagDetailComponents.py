@@ -477,22 +477,28 @@ def main():
 def force_rerun_next_time():
     """Dynamo skips nodes whose inputs haven't changed, so the script would only
     run once. Mark this node as modified so the next Run executes it again.
-    Skipped in Automatic mode, where it would re-trigger itself endlessly."""
+    Skipped in Automatic mode, where it would re-trigger itself endlessly.
+    Returns a short status line for the Watch node (helps diagnose re-run issues)."""
     try:
         clr.AddReference("DynamoRevitDS")
         import Dynamo
         workspace = Dynamo.Applications.DynamoRevit().RevitDynamoModel.CurrentWorkspace
-        if "Automatic" in str(workspace.RunSettings.RunType):
-            return
+        run_type = str(workspace.RunSettings.RunType)
+        if "Automatic" in run_type:
+            return "Re-run: skipped (graph is in Automatic mode - switch to Manual)."
+        marked = 0
         for node in workspace.Nodes:
             code = getattr(node, "Code", None) or ""
             if "force_rerun_next_time" in code:
                 node.MarkNodeAsModified(True)
-    except Exception:
-        pass
+                marked += 1
+        return "Re-run: marked {0} node(s) for next run ({1} mode).".format(marked, run_type)
+    except Exception as ex:
+        return "Re-run: could not mark node - {0}".format(ex)
 
 
 try:
     OUT = main()
-finally:
-    force_rerun_next_time()
+except Exception as ex:
+    OUT = ["Error: {0}".format(ex)], []
+OUT = [OUT[0] + [force_rerun_next_time()], OUT[1]]
