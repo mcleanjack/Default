@@ -14,14 +14,15 @@ feet, so a value like 29.4 mm / 4.2 mm can evaluate to 6.9999999 and
 1. Open the family, select the Length parameter in Family Types.
 2. For each row below, type the Length, click Apply, and check:
    - number of lines matches **Lines**
-   - every gap is 4.2 mm except the last, which matches **Last gap**
-   - the last gap is never larger than 4.2 mm
+   - every gap between lines is 4.2 mm
+   - the space from the last line to the end matches **Remainder**
+   - the remainder is always under 4.2 mm (never an oversized last column)
 3. Load into a project, place an instance, and drag the end grip across a few
    of the same values to confirm the instance flexes the same way.
 
-| Length (mm) | Lines | Last gap (mm) | Why it's here              |
-|-------------|-------|---------------|----------------------------|
-| 4.2         | 2     | 0 (on line)   | smallest valid size        |
+| Length (mm) | Lines | Remainder (mm) | Why it's here              |
+|-------------|-------|----------------|----------------------------|
+| 4.2         | 2     | 0              | smallest valid size        |
 | 8.4         | 3     | 0             | exact multiple             |
 | 10          | 3     | 1.6           | non-multiple               |
 | 12.6        | 4     | 0             | exact multiple             |
@@ -35,6 +36,5 @@ feet, so a value like 29.4 mm / 4.2 mm can evaluate to 6.9999999 and
 
 - Length below 4.2 mm gives Count = 1, and Revit arrays need at least 2, so
   the family will error. Either constrain Length >= 4.2 mm or accept it.
-- If the last line must sit exactly on the end reference, the last gap of 0
-  on exact multiples means two lines coincide with the end; decide whether
-  that's wanted.
+- On exact multiples the last line lands on the end reference. If the family
+  also draws a separate boundary line there, the two will overlap.
