@@ -69,6 +69,7 @@ TAG_CATEGORIES = [BuiltInCategory.OST_MultiCategoryTags,
 SETTINGS_FILE = os.path.join(os.environ.get("TEMP", os.path.expanduser("~")),
                              "AutoTagDetailComponents.json")
 MM_TO_FT = 1.0 / 304.8
+STRAIGHT_STUB_MM = 0.5   # straight leaders: elbow distance from the arrow end (mm on sheet)
 TOL = 1e-6
 
 
@@ -423,7 +424,14 @@ def tag_batch(options, tag_types):
                 if options["leader"] == "elbow" and abs(hv - end_v) > TOL and abs(end_u - head_u) > TOL:
                     elbow = to_xyz(end_u, hv, depth)            # horizontal, then vertical
                 else:
-                    elbow = to_xyz((head_u + end_u) / 2.0, (hv + end_v) / 2.0, depth)  # straight
+                    # Straight: Revit starts the leader at the text edge, not at the
+                    # tag head, so a mid-point elbow shows a kink. Put the elbow a
+                    # tiny stub away from the arrow end so the visible leader is one
+                    # straight run from the text to the component.
+                    du, dv = head_u - end_u, hv - end_v
+                    dist = (du * du + dv * dv) ** 0.5
+                    k = min(0.5, STRAIGHT_STUB_MM * MM_TO_FT * scale / dist) if dist > TOL else 0.5
+                    elbow = to_xyz(end_u + du * k, end_v + dv * k, depth)
                 set_leader(tag, ref, end, elbow)
                 tag.TagHeadPosition = head
                 created.append(tag)
