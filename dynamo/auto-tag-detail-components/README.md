@@ -24,7 +24,7 @@ Requires Revit 2022+ with Dynamo 2.12+ (CPython3 engine). It also runs on the Ir
    - **Tag height**: *Level with each picked point*, or *Spread evenly along the guide line* (from the top of the line to the bottom).
    - Optionally, **delete the guide line** after tagging.
 4. Click the guide line.
-5. Click each detail component **on the exact spot where the arrow should land**. Press **ESC** to finish.
+5. Click each detail component **on the exact spot where the arrow should land**. Press **ESC** to finish. Each component you pick **turns blue** and stays blue, across batches, until you click **Finish**. Then its original graphics are restored. If Revit ever closes mid-run and leaves a component blue, right-click it and choose *Override Graphics in View > By Element... > Reset*.
 
 The tags are created as Free End leaders, with the tag head on the guide line. A tag type that isn't loaded in the project is greyed out in the dialog. Your last choices are remembered.
 

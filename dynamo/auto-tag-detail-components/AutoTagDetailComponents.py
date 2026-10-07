@@ -8,6 +8,7 @@ Workflow
   3. Pick the tag type, leader style and placement options in the dialog.
   4. Click the guide line.
   5. Click each detail component to tag, on the exact spot the arrow should land.
+     Picked components turn blue until you click Finish.
      Press ESC (or right-click > Cancel) when finished.
   6. Tags are created with their text aligned to the guide line, and the
      dialog comes back so you can tag the next set (new line, other tag type,
@@ -33,9 +34,9 @@ clr.AddReference("System.Windows.Forms")
 clr.AddReference("System.Drawing")
 
 from Autodesk.Revit.DB import (
-    BuiltInCategory, BuiltInParameter, ElementId, FilteredElementCollector,
-    IndependentTag, LeaderEndCondition, Reference, TagMode, TagOrientation,
-    Transaction, XYZ,
+    BuiltInCategory, BuiltInParameter, Color, ElementId, FilteredElementCollector,
+    IndependentTag, LeaderEndCondition, OverrideGraphicSettings, Reference,
+    TagMode, TagOrientation, Transaction, XYZ,
 )
 from Autodesk.Revit.UI.Selection import ISelectionFilter, ObjectType
 import Autodesk.Revit.Exceptions as RvtExc
@@ -69,6 +70,7 @@ TAG_CATEGORIES = [BuiltInCategory.OST_MultiCategoryTags,
 SETTINGS_FILE = os.path.join(os.environ.get("TEMP", os.path.expanduser("~")),
                              "AutoTagDetailComponents.json")
 MM_TO_FT = 1.0 / 304.8
+HIGHLIGHT_COLOR = (0, 120, 215)   # blue used to mark picked components until Finish
 TOL = 1e-6
 
 
@@ -401,6 +403,52 @@ def text_centre_offset(tag, elem, head_u, v, depth, scale):
 
 
 # ---------------------------------------------------------------------------
+# Highlighting picked components (temporary view override, restored on Finish)
+# ---------------------------------------------------------------------------
+_original_overrides = {}   # element id value -> (ElementId, original OverrideGraphicSettings)
+
+
+def _id_key(eid):
+    try:
+        return eid.Value            # Revit 2024+
+    except AttributeError:
+        return eid.IntegerValue
+
+
+def highlight(elem):
+    key = _id_key(elem.Id)
+    if key in _original_overrides:
+        return
+    original = view.GetElementOverrides(elem.Id)
+    ogs = OverrideGraphicSettings(original)
+    blue = Color(*HIGHLIGHT_COLOR)
+    ogs.SetProjectionLineColor(blue)
+    ogs.SetCutLineColor(blue)
+    t = Transaction(doc, "Auto Tag - highlight component")
+    t.Start()
+    view.SetElementOverrides(elem.Id, ogs)
+    t.Commit()
+    _original_overrides[key] = (elem.Id, original)
+    uidoc.RefreshActiveView()
+
+
+def clear_highlights():
+    if not _original_overrides:
+        return
+    t = Transaction(doc, "Auto Tag - clear highlights")
+    t.Start()
+    for eid, original in _original_overrides.values():
+        try:
+            if doc.GetElement(eid) is not None:
+                view.SetElementOverrides(eid, original)
+        except Exception:
+            pass
+    t.Commit()
+    _original_overrides.clear()
+    uidoc.RefreshActiveView()
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 def tag_batch(options, tag_types):
@@ -437,6 +485,7 @@ def tag_batch(options, tag_types):
         elem = doc.GetElement(ref)
         u, v = to_uv(pick_point_of(ref, elem))
         picks.append((v, u, elem))
+        highlight(elem)
     if not picks:
         return "No components picked.", [], []
 
@@ -511,14 +560,17 @@ def main():
     all_tags, messages = [], []
     status = "Draw a vertical detail line, then click 'Pick line & tag'."
     options = load_settings()
-    while True:
-        options = show_dialog(tag_types, options, status)
-        if options is None:
-            break
-        save_settings(options)
-        status, created, errors = tag_batch(options, tag_types)
-        all_tags.extend(created)
-        messages.extend(errors)
+    try:
+        while True:
+            options = show_dialog(tag_types, options, status)
+            if options is None:
+                break
+            save_settings(options)
+            status, created, errors = tag_batch(options, tag_types)
+            all_tags.extend(created)
+            messages.extend(errors)
+    finally:
+        clear_highlights()      # put picked components back to normal on Finish/error
 
     messages.insert(0, "Finished: created {0} tag(s) in total.".format(len(all_tags)))
     return messages, all_tags
