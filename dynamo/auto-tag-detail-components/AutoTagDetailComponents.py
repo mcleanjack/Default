@@ -5,7 +5,7 @@ Auto Tag Detail Components  (Dynamo Python node)
 Workflow
   1. Draw a vertical detail line in the active view where the tag text should align.
   2. Run the graph (Dynamo Player recommended).
-  3. Pick the tag type, leader style and placement options in the dialog.
+  3. Pick the tag type in the dialog.
   4. Click the guide line.
   5. Click each detail component to tag, on the exact spot the arrow should land.
      Picked components turn blue until you click Finish.
@@ -17,8 +17,7 @@ Workflow
 
 Inputs
   IN[0]  Run                            (bool)   False = do nothing
-  IN[1]  Minimum tag spacing (mm sheet) (float)  vertical gap kept between tag heads
-  IN[2]  Text offset from line (mm)     (float)  0 = text edge sits on the line
+  IN[1]  Text offset from line (mm)     (float)  0 = text edge sits on the line
 
 Written to run on both the CPython3 and IronPython2 engines (no f-strings).
 """
@@ -71,7 +70,6 @@ SETTINGS_FILE = os.path.join(os.environ.get("TEMP", os.path.expanduser("~")),
                              "AutoTagDetailComponents.json")
 MM_TO_FT = 1.0 / 304.8
 HIGHLIGHT_COLOR = (0, 120, 215)   # blue used to mark picked components until Finish
-TOL = 1e-6
 
 
 def _input(index, default):
@@ -83,8 +81,7 @@ def _input(index, default):
 
 
 run = bool(_input(0, True))
-spacing_mm = float(_input(1, 5.0))
-offset_mm = float(_input(2, 0.0))
+offset_mm = float(_input(1, 0.0))
 
 
 # ---------------------------------------------------------------------------
@@ -151,7 +148,7 @@ def show_dialog(available, defaults, status=""):
     form.MinimizeBox = False
     form.StartPosition = FormStartPosition.CenterScreen
     form.TopMost = True
-    form.ClientSize = Size(380, 510)
+    form.ClientSize = Size(380, 320)
 
     def group(text, y, height):
         g = GroupBox()
@@ -200,41 +197,24 @@ def show_dialog(available, defaults, status=""):
                 rb.Checked = True
                 break
 
-    # Leader style
-    g_leader = group("Leader", 195, 80)
-    elbow_default = defaults.get("leader", "elbow") == "elbow"
-    rb_elbow = radio(g_leader, "Right-angle bend (horizontal, then vertical)", 22, elbow_default)
-    rb_straight = radio(g_leader, "Straight horizontal (tag level with each click)", 46, not elbow_default)
-
-    # Placement
-    g_place = group("Tag height", 285, 80)
-    spread_default = defaults.get("placement") == "spread"
-    rb_level = radio(g_place, "Level with each picked point", 22, not spread_default)
-    rb_spread = radio(g_place, "Spread evenly along the guide line", 46, spread_default)
-
-    def sync_placement(sender=None, args=None):
-        # Straight leaders are always horizontal, so tags stay level with each click.
-        g_place.Enabled = rb_elbow.Checked
-    rb_elbow.CheckedChanged += sync_placement
-    sync_placement()
-
     cb_delete = CheckBox()
     cb_delete.Text = "Delete guide line after tagging"
     cb_delete.AutoSize = True
-    cb_delete.Location = Point(18, 378)
+    cb_delete.Location = Point(18, 196)
     cb_delete.Checked = bool(defaults.get("delete_line", False))
     form.Controls.Add(cb_delete)
 
     status_lbl = Label()
     status_lbl.Text = status
-    status_lbl.Location = Point(18, 404)
+    status_lbl.UseMnemonic = False      # show "&" literally
+    status_lbl.Location = Point(18, 222)
     status_lbl.Size = Size(350, 48)
     form.Controls.Add(status_lbl)
 
     ok_btn = Button()
     ok_btn.Text = "Pick line && tag"
     ok_btn.Size = Size(120, 30)
-    ok_btn.Location = Point(116, 464)
+    ok_btn.Location = Point(116, 276)
     ok_btn.DialogResult = DialogResult.OK
     form.Controls.Add(ok_btn)
     form.AcceptButton = ok_btn
@@ -242,7 +222,7 @@ def show_dialog(available, defaults, status=""):
     cancel_btn = Button()
     cancel_btn.Text = "Finish"
     cancel_btn.Size = Size(120, 30)
-    cancel_btn.Location = Point(248, 464)
+    cancel_btn.Location = Point(248, 276)
     cancel_btn.DialogResult = DialogResult.Cancel
     form.Controls.Add(cancel_btn)
     form.CancelButton = cancel_btn
@@ -255,8 +235,6 @@ def show_dialog(available, defaults, status=""):
         return None
     return {
         "tag": chosen[0],
-        "leader": "elbow" if rb_elbow.Checked else "straight",
-        "placement": "spread" if rb_spread.Checked else "level",
         "delete_line": bool(cb_delete.Checked),
     }
 
@@ -321,24 +299,6 @@ def pick_point_of(ref, elem):
         return p
     bb = elem.get_BoundingBox(view)
     return bb.Min.Add(bb.Max).Multiply(0.5)
-
-
-def spread_heights(picked_vs, top, bottom):
-    """Head heights ordered top-down, same order as sorted picked_vs."""
-    n = len(picked_vs)
-    if n == 1:
-        return [min(max(picked_vs[0], bottom), top)]
-    step = (top - bottom) / float(n - 1)
-    return [top - i * step for i in range(n)]
-
-
-def level_heights(picked_vs, gap):
-    heads = []
-    for v in picked_vs:
-        if heads and heads[-1] - v < gap:
-            v = heads[-1] - gap
-        heads.append(v)
-    return heads
 
 
 def set_leader(tag, ref, end, elbow):
@@ -471,7 +431,6 @@ def tag_batch(options, tag_types):
     if abs(u1 - u0) > abs(v1 - v0):
         return "The guide line must be vertical (it looks horizontal).", [], []
     line_u = (u0 + u1) / 2.0
-    top, bottom = max(v0, v1), min(v0, v1)
     depth = p0.Subtract(V_ORIGIN).DotProduct(V_NORMAL)
 
     # 2. Components - one click each, ESC to finish
@@ -489,18 +448,9 @@ def tag_batch(options, tag_types):
     if not picks:
         return "No components picked.", [], []
 
-    # 3. Tag head positions (top-down order)
-    picks.sort(key=lambda t: -t[0])
+    # 3. Each tag sits level with its click so the leader runs horizontal
     scale = float(view.Scale) if view.Scale else 1.0
-    gap = spacing_mm * MM_TO_FT * scale
     offset = offset_mm * MM_TO_FT * scale
-    picked_vs = [p[0] for p in picks]
-    if options["leader"] == "straight":
-        heads_v = picked_vs                     # level with each click -> horizontal leader
-    elif options["placement"] == "spread":
-        heads_v = spread_heights(picked_vs, top, bottom)
-    else:
-        heads_v = level_heights(picked_vs, gap)
     head_u = line_u - offset if side == "left" else line_u + offset
 
     # 4. Create tags - committed per batch so they show up (and undo) straight away
@@ -508,7 +458,8 @@ def tag_batch(options, tag_types):
     t = Transaction(doc, "Auto Tag Detail Components")
     t.Start()
     try:
-        for (end_v, end_u, elem), hv in zip(picks, heads_v):
+        for end_v, end_u, elem in picks:
+            hv = end_v
             try:
                 ref = Reference(elem)
                 end = to_xyz(end_u, end_v, depth)
@@ -519,10 +470,7 @@ def tag_batch(options, tag_types):
                 head = to_xyz(head_u, head_v, depth)
                 tag.TagHeadPosition = head
                 tag.HasLeader = True
-                if options["leader"] == "elbow" and abs(hv - end_v) > TOL and abs(end_u - head_u) > TOL:
-                    elbow = to_xyz(end_u, hv, depth)            # horizontal, then vertical
-                else:
-                    elbow = to_xyz((head_u + end_u) / 2.0, hv, depth)  # on the horizontal run
+                elbow = to_xyz((head_u + end_u) / 2.0, hv, depth)  # on the horizontal run
                 set_leader(tag, ref, end, elbow)
                 tag.TagHeadPosition = head
                 created.append(tag)
@@ -537,9 +485,7 @@ def tag_batch(options, tag_types):
         raise
     uidoc.RefreshActiveView()
 
-    status = "Last run: created {0} '{1}' tag(s) with {2} leaders.".format(
-        len(created), options["tag"],
-        "right-angle" if options["leader"] == "elbow" else "straight")
+    status = "Last run: created {0} '{1}' tag(s).".format(len(created), options["tag"])
     if errors:
         status += " {0} failed (see Dynamo output).".format(len(errors))
     return status, created, errors

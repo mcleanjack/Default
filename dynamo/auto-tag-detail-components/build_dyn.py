@@ -47,7 +47,6 @@ def build():
 
     inputs = [
         ("run", "Run", bool_node("run", True), "boolean", "true"),
-        ("spacing", "Minimum tag spacing (mm on sheet)", number_node("spacing", 5.0), "number", "5"),
         ("offset", "Text offset from guide line (mm on sheet)", number_node("offset", 0.0), "number", "0"),
     ]
     python = {
