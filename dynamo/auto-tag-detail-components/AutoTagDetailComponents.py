@@ -8,7 +8,7 @@ Workflow
   3. Pick the side of the line in the dialog.
   4. Click the guide line.
   5. Click each detail component to tag, on the exact spot the arrow should land.
-     Finish with the green tick (Finish) on the options bar, or ESC.
+     Finish with the green Finish button over the view, or ESC.
      Press D (Description tag) or C (Comments tag) at any time to switch the tag
      used for the following clicks - a notice briefly shows the selected tag.
      Picking starts with the Description tag; the dialog only sets the side.
@@ -48,8 +48,8 @@ from RevitServices.Persistence import DocumentManager
 from RevitServices.Transactions import TransactionManager
 
 from System.Windows.Forms import (
-    Button, CheckBox, Cursor, DialogResult, Form, FormBorderStyle,
-    FormStartPosition, GroupBox, Label, Padding, RadioButton,
+    Button, CheckBox, Cursor, DialogResult, DockStyle, FlatStyle, Form,
+    FormBorderStyle, FormStartPosition, GroupBox, Label, Padding, RadioButton,
 )
 from System.Drawing import Point, Size, Font, FontStyle
 from System.Drawing import Color as DrawColor
@@ -59,7 +59,6 @@ try:
     import ctypes
     _user32 = ctypes.windll.user32
     _user32.GetKeyState.restype = ctypes.c_short
-    _user32.GetAsyncKeyState.restype = ctypes.c_short
     _user32.GetForegroundWindow.restype = ctypes.c_void_p
     _user32.SetForegroundWindow.argtypes = [ctypes.c_void_p]
 except Exception:
@@ -325,45 +324,7 @@ def show_notice(text):
     _watch["notice_timer"] = t
 
 
-def _record_click():
-    """Turn the cursor position into view coordinates and remember it together
-    with the element under the cursor and the tag active at that moment.
-    (Multi-select picking doesn't report where each element was clicked.)"""
-    uiview = _watch.get("uiview")
-    if uiview is None:
-        return
-    pos = Cursor.Position
-    r = uiview.GetWindowRectangle()
-    if not (r.Left <= pos.X <= r.Right and r.Top <= pos.Y <= r.Bottom):
-        return                                  # e.g. the Finish tick on the options bar
-    corners = uiview.GetZoomCorners()
-    u0, v0 = to_uv(corners[0])
-    u1, v1 = to_uv(corners[1])
-    fx = (pos.X - r.Left) / float(max(r.Right - r.Left, 1))
-    fy = (r.Bottom - pos.Y) / float(max(r.Bottom - r.Top, 1))
-    _watch["clicks"].append({
-        "elem": _watch.get("hover"),
-        "u": u0 + fx * (u1 - u0),
-        "v": v0 + fy * (v1 - v0),
-        "tag": _watch["current"],
-    })
-
-
-def _poll_mouse():
-    if _user32 is None:
-        return
-    state = _user32.GetAsyncKeyState(0x01)      # left mouse button
-    held = bool(state & 0x8000)
-    if (held or state & 0x0001) and not _watch.get("mouse_prev"):
-        _record_click()
-    _watch["mouse_prev"] = held
-
-
 def _poll_keys(sender, args):
-    try:
-        _poll_mouse()
-    except Exception:
-        pass
     try:
         for key, name in TAG_SHORTCUTS[_watch["side"]]:
             down = key_down(key)
@@ -379,15 +340,8 @@ def _poll_keys(sender, args):
 
 
 def start_key_watch(side, available, start_name):
-    uiview = None
-    for uv in uidoc.GetOpenUIViews():
-        if uv.ViewId.Equals(view.Id):
-            uiview = uv
-    if _user32 is not None:
-        _user32.GetAsyncKeyState(0x01)          # clear the "pressed since last call" bit
     _watch.update(side=side, current=start_name, available=available,
-                  prev={k: key_down(k) for k in VK_CODES},
-                  uiview=uiview, hover=None, clicks=[], mouse_prev=True)
+                  prev={k: key_down(k) for k in VK_CODES})
     t = FormsTimer()
     t.Interval = 50
     t.Tick += _poll_keys
@@ -402,6 +356,78 @@ def stop_key_watch():
         t.Dispose()
         _watch["timer"] = None
     close_notice()
+    close_finish_panel()
+
+
+# ---------------------------------------------------------------------------
+# Green tick "Finish" button floating over the view while picking.
+# Revit's own options-bar tick only exists in multi-select mode, which can't
+# report where each component was clicked - so this button simply presses ESC
+# for you, which ends picking exactly like pressing ESC yourself.
+# ---------------------------------------------------------------------------
+def _press_escape():
+    if _user32 is None:
+        return
+    try:
+        hwnd = DocumentManager.Instance.CurrentUIApplication.MainWindowHandle
+        _user32.SetForegroundWindow(hwnd.ToInt64())
+    except Exception:
+        pass
+    _user32.keybd_event(0x1B, 0, 0, 0)          # ESC down
+    _user32.keybd_event(0x1B, 0, 2, 0)          # ESC up
+
+
+def _on_finish_click(sender, args):
+    _press_escape()
+
+
+def show_finish_panel():
+    close_finish_panel()
+    if _user32 is None:
+        return                                  # can't press ESC for you - use ESC
+    previous = _user32.GetForegroundWindow()
+    location = None
+    try:
+        for uv in uidoc.GetOpenUIViews():
+            if uv.ViewId.Equals(view.Id):
+                r = uv.GetWindowRectangle()
+                location = Point(r.Left + 12, r.Top + 12)
+    except Exception:
+        pass
+    if location is None:
+        pos = Cursor.Position
+        location = Point(pos.X + 20, pos.Y - 60)
+
+    f = Form()
+    f.FormBorderStyle = getattr(FormBorderStyle, "None")
+    f.StartPosition = FormStartPosition.Manual
+    f.Location = location
+    f.TopMost = True
+    f.ShowInTaskbar = False
+    f.ClientSize = Size(130, 40)
+    b = Button()
+    b.Text = u"\u2714  Finish"
+    b.Dock = DockStyle.Fill
+    b.FlatStyle = FlatStyle.Flat
+    b.BackColor = DrawColor.FromArgb(46, 160, 67)
+    b.ForeColor = DrawColor.White
+    b.Font = Font("Segoe UI", 11.0, FontStyle.Bold)
+    b.Click += _on_finish_click
+    f.Controls.Add(b)
+    f.Show()
+    try:
+        _user32.SetForegroundWindow(previous)   # keep Revit active for picking
+    except Exception:
+        pass
+    _watch["panel"] = f
+
+
+def close_finish_panel():
+    f = _watch.get("panel")
+    if f is not None:
+        f.Close()
+        f.Dispose()
+        _watch["panel"] = None
 
 
 # ---------------------------------------------------------------------------
@@ -430,10 +456,7 @@ class DetailItemFilter(ISelectionFilter):
 
     def AllowElement(self, elem):
         try:
-            ok = cat_is(elem, BuiltInCategory.OST_DetailComponents)
-            if ok:
-                _watch["hover"] = elem.Id       # element under the cursor (pre-highlight)
-            return ok
+            return cat_is(elem, BuiltInCategory.OST_DetailComponents)
         except Exception:
             return False
 
@@ -530,53 +553,6 @@ def text_centre_offset(tag, elem, head_u, v, depth, scale):
     return (top + bottom) / 2.0
 
 
-def _click_for(elem, clicks, tol):
-    """Latest recorded click on this element (hovered + inside its extents)."""
-    bb = elem.get_BoundingBox(view)
-    if bb is None:
-        return None
-    (ua, va), (ub, vb) = to_uv(bb.Min), to_uv(bb.Max)
-    ulo, uhi, vlo, vhi = min(ua, ub) - tol, max(ua, ub) + tol, min(va, vb) - tol, max(va, vb) + tol
-    for c in reversed(clicks):
-        if c["elem"] is not None and c["elem"].Equals(elem.Id) \
-                and ulo <= c["u"] <= uhi and vlo <= c["v"] <= vhi:
-            return c
-    return None
-
-
-def resolve_picks(refs, clicks, scale):
-    """Pair each selected element with the point it was clicked at and the tag
-    that was active then. refs is None when picking ended with ESC; the
-    recorded clicks are used instead."""
-    tol = 2.0 * MM_TO_FT * scale
-    if refs is not None:
-        items = [(doc.GetElement(r), r) for r in refs]
-    else:
-        items, seen = [], set()
-        for c in clicks:
-            if c["elem"] is None:
-                continue
-            key = _id_key(c["elem"])
-            elem = doc.GetElement(c["elem"])
-            if key in seen or elem is None or _click_for(elem, clicks, tol) is None:
-                continue
-            seen.add(key)
-            items.append((elem, None))
-    picks = []
-    for elem, ref in items:
-        c = _click_for(elem, clicks, tol)
-        if c is not None:
-            picks.append((c["v"], c["u"], elem, c["tag"]))
-        else:                                   # e.g. window-selected: use its centre
-            p = pick_point_of(ref, elem) if ref is not None else None
-            if p is None:
-                bb = elem.get_BoundingBox(view)
-                p = bb.Min.Add(bb.Max).Multiply(0.5)
-            u, v = to_uv(p)
-            picks.append((v, u, elem, _watch["current"]))
-    return picks
-
-
 # ---------------------------------------------------------------------------
 # Highlighting picked components (temporary view override, restored on Finish)
 # ---------------------------------------------------------------------------
@@ -649,28 +625,29 @@ def tag_batch(options, tag_types):
     line_u = (u0 + u1) / 2.0
     depth = p0.Subtract(V_ORIGIN).DotProduct(V_NORMAL)
 
-    scale = float(view.Scale) if view.Scale else 1.0
-
-    # 2. Components - click each one; D / C switch tag; finish with the green
-    #    tick (Finish) on the options bar or ESC
+    # 2. Components - click each one; press D or C at any time to switch tag; ESC to finish
+    picks = []
     start_key_watch(side, tag_types, start_name)
-    refs = None
+    show_finish_panel()
     try:
-        prompt = ("Click each component where the arrow should land  "
-                  "(D = Description, C = Comments, green tick or ESC = finish)")
-        try:
-            refs = uidoc.Selection.PickObjects(ObjectType.Element, DetailItemFilter(), prompt)
-        except RvtExc.OperationCanceledException:
-            refs = None                         # ESC: use the clicks recorded so far
+        while True:
+            prompt = "[{0}] Click component #{1} where the arrow should land  (D = Description, C = Comments, green Finish button or ESC = finish)".format(
+                _watch["current"], len(picks) + 1)
+            try:
+                ref = uidoc.Selection.PickObject(ObjectType.Element, DetailItemFilter(), prompt)
+            except RvtExc.OperationCanceledException:
+                break
+            elem = doc.GetElement(ref)
+            u, v = to_uv(pick_point_of(ref, elem))
+            picks.append((v, u, elem, _watch["current"]))
+            highlight(elem)
     finally:
         stop_key_watch()
-    picks = resolve_picks(refs, _watch["clicks"], scale)
-    for _v, _u, elem, _t in picks:
-        highlight(elem)
     if not picks:
         return "No components picked.", [], []
 
     # 3. Each tag sits level with its click so the leader runs horizontal
+    scale = float(view.Scale) if view.Scale else 1.0
     offset = offset_mm * MM_TO_FT * scale
     head_u = line_u - offset if side == "left" else line_u + offset
 
