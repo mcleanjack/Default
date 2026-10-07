@@ -474,4 +474,25 @@ def main():
     return messages, all_tags
 
 
-OUT = main()
+def force_rerun_next_time():
+    """Dynamo skips nodes whose inputs haven't changed, so the script would only
+    run once. Mark this node as modified so the next Run executes it again.
+    Skipped in Automatic mode, where it would re-trigger itself endlessly."""
+    try:
+        clr.AddReference("DynamoRevitDS")
+        import Dynamo
+        workspace = Dynamo.Applications.DynamoRevit().RevitDynamoModel.CurrentWorkspace
+        if "Automatic" in str(workspace.RunSettings.RunType):
+            return
+        for node in workspace.Nodes:
+            code = getattr(node, "Code", None) or ""
+            if "force_rerun_next_time" in code:
+                node.MarkNodeAsModified(True)
+    except Exception:
+        pass
+
+
+try:
+    OUT = main()
+finally:
+    force_rerun_next_time()

@@ -30,9 +30,7 @@ The tags are created as Free End leaders, with the tag head on the guide line. A
 
 6. **The dialog comes back** after every batch, so you can keep going: draw another line, pick another tag type or side, and tag again. Click **Finish** when you're done. Each batch is committed straight away and is its own undo step (Ctrl+Z).
 
-To start the script again after clicking Finish:
-- **Dynamo Player**: press Run. The script runs every time.
-- **Dynamo editor**: Dynamo doesn't re-run a node whose inputs haven't changed. Toggle **Run** to False and back to True, then click Run.
+To start the script again after clicking Finish, just press **Run** again, in Dynamo Player or the Dynamo editor. Dynamo normally skips a node whose inputs haven't changed, so at the end of each run the script marks its own node as changed. Keep the graph in **Manual** run mode; in Automatic mode it would keep restarting itself, so the script doesn't do this there.
 
 ## Inputs (exposed in Dynamo Player)
 
