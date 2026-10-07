@@ -364,14 +364,40 @@ def create_tag(type_id, ref, head):
     return tag
 
 
-def text_centre_v(tag):
-    """Vertical centre of the tag text in view coordinates (Revit starts the
-    leader at the middle of the text, not at the tag head point)."""
+def v_extent(bb):
+    vs = [to_uv(bb.Min)[1], to_uv(bb.Max)[1]]
+    return min(vs), max(vs)
+
+
+def text_centre_offset(tag, elem, head_u, v, depth, scale):
+    """Vertical offset from the tag head to the middle of its text, where Revit
+    starts the leader.
+
+    A tag's bounding box can also cover part of the tagged element, so it can't
+    be read directly. Instead, move the tag well ABOVE the element and read the
+    top of the box, then well BELOW and read the bottom. Both readings then come
+    from the text alone."""
+    span = 0.0
+    eb = elem.get_BoundingBox(view)
+    if eb is not None:
+        lo, hi = v_extent(eb)
+        span = hi - lo
+    d = span + 200.0 * MM_TO_FT * scale + 1.0
+
+    tag.TagHeadPosition = to_xyz(head_u, v + d, depth)
     doc.Regenerate()
     bb = tag.get_BoundingBox(view)
     if bb is None:
-        return None
-    return to_uv(bb.Min.Add(bb.Max).Multiply(0.5))[1]
+        return 0.0
+    top = v_extent(bb)[1] - (v + d)
+
+    tag.TagHeadPosition = to_xyz(head_u, v - d, depth)
+    doc.Regenerate()
+    bb = tag.get_BoundingBox(view)
+    if bb is None:
+        return 0.0
+    bottom = v_extent(bb)[0] - (v - d)
+    return (top + bottom) / 2.0
 
 
 # ---------------------------------------------------------------------------
@@ -440,8 +466,7 @@ def tag_batch(options, tag_types):
                 # hv is where the leader should leave the text. Place the tag,
                 # measure its text, then shift it so the text centre sits on hv.
                 tag = create_tag(type_id, ref, to_xyz(head_u, hv, depth))
-                centre_v = text_centre_v(tag)
-                head_v = hv + (hv - centre_v) if centre_v is not None else hv
+                head_v = hv - text_centre_offset(tag, elem, head_u, hv, depth, scale)
                 head = to_xyz(head_u, head_v, depth)
                 tag.TagHeadPosition = head
                 tag.HasLeader = True
