@@ -22,7 +22,7 @@ Requires Revit 2022+ with Dynamo 2.12+ (CPython3 engine). It also runs on the Ir
      - Right of the line: `Description Tag` or `Comments Tag`
    - Optionally, **delete the guide line** after tagging.
 4. Click the guide line.
-5. Click each detail component **on the exact spot where the arrow should land**. A small popup appears by the cursor. Press **D** for a Description tag or **C** for a Comments tag. **Enter** repeats your last choice, and **Esc** stops picking. The tag chosen in the dialog sets which side of the line the tags go on, and which tag is the default. Each component you pick **turns blue** and stays blue, across batches, until you click **Finish**. Then its original graphics are restored. If Revit ever closes mid-run and leaves a component blue, right-click it and choose *Override Graphics in View > By Element... > Reset*.
+5. Click each detail component **on the exact spot where the arrow should land**. You can press **D** (Description tag) or **C** (Comments tag) at any time, and the tag you choose is used for every click after that. When you switch, a small blue notice such as "Tag selected: Comments Tag" appears by the cursor for about 1.5 seconds. No popup appears between clicks. The tag chosen in the dialog sets the side of the line and the tag you start with. Press **ESC** to finish picking. Each picked component turns blue until you click **Finish**.
 
 Each tag sits level with the point you clicked, with a straight horizontal Free End leader running from its text to that point. The text edge sits on the guide line. A tag type that isn't loaded in the project is greyed out in the dialog. Your last choices are remembered.
 
@@ -43,3 +43,4 @@ To start the script again after clicking Finish, just press **Run** again, in Dy
 - For the text to finish exactly on the line, the label's origin in the "Align Right" families must be at the right edge of the text. In the left-aligned families, it must be at the left edge.
 - Revit starts a leader at the vertical middle of the tag text. The script measures each tag and shifts it so that middle lines up with the leader, which keeps leaders horizontal for one-line and multi-line notes.
 - Tags are never moved apart, so click components far enough apart vertically that the notes don't overlap.
+- If pressing D or C ends picking early, a Revit keyboard shortcut is probably being triggered. Check *View > User Interface > Keyboard Shortcuts* for any shortcut that is just `D` or `C`.

@@ -7,9 +7,10 @@ Workflow
   2. Run the graph (Dynamo Player recommended).
   3. Pick the tag type in the dialog.
   4. Click the guide line.
-  5. Click each detail component to tag, on the exact spot the arrow should land,
-     then press D (Description tag) or C (Comments tag) in the popup.
-     The tag picked in the dialog sets the side of the line and the default.
+  5. Click each detail component to tag, on the exact spot the arrow should land.
+     Press D (Description tag) or C (Comments tag) at any time to switch the tag
+     used for the following clicks - a notice briefly shows the selected tag.
+     The tag picked in the dialog sets the side of the line and the starting tag.
      Picked components turn blue until you click Finish.
      Press ESC (or right-click > Cancel) when finished.
   6. Tags are created with their text aligned to the guide line, and the
@@ -47,9 +48,20 @@ from RevitServices.Transactions import TransactionManager
 
 from System.Windows.Forms import (
     Button, CheckBox, Cursor, DialogResult, Form, FormBorderStyle,
-    FormStartPosition, GroupBox, Label, RadioButton,
+    FormStartPosition, GroupBox, Label, Padding, RadioButton,
 )
-from System.Drawing import Point, Size
+from System.Drawing import Point, Size, Font, FontStyle
+from System.Drawing import Color as DrawColor
+from System.Windows.Forms import Timer as FormsTimer
+
+try:
+    import ctypes
+    _user32 = ctypes.windll.user32
+    _user32.GetKeyState.restype = ctypes.c_short
+    _user32.GetForegroundWindow.restype = ctypes.c_void_p
+    _user32.SetForegroundWindow.argtypes = [ctypes.c_void_p]
+except Exception:
+    _user32 = None
 
 doc = DocumentManager.Instance.CurrentDBDocument
 uidoc = DocumentManager.Instance.CurrentUIApplication.ActiveUIDocument
@@ -184,7 +196,7 @@ def show_dialog(available, defaults, status=""):
         return rb
 
     # Tag type
-    g_tag = group("Side of line + default tag (press D / C while picking to switch)", 10, 175)
+    g_tag = group("Side of line + starting tag (press D / C while picking to switch)", 10, 175)
     tag_radios = []
     y = 22
     for side, heading in (("left", "LEFT of line (text aligned right)"),
@@ -247,59 +259,114 @@ def show_dialog(available, defaults, status=""):
     }
 
 
-def ask_tag_shortcut(side, available, last_name, number):
-    """Small popup next to the cursor after each component click.
-    Press D or C (button mnemonics work without Alt), Enter repeats the last
-    choice, Esc stops picking. Returns the tag name, or None for Esc."""
-    form = Form()
-    form.Text = "Tag component #{0}".format(number)
-    form.FormBorderStyle = FormBorderStyle.FixedToolWindow
-    form.StartPosition = FormStartPosition.Manual
+# ---------------------------------------------------------------------------
+# D / C shortcut keys while picking components
+# A WinForms timer keeps ticking while Revit waits for a pick, so it can poll the
+# keyboard. Pressing the other key switches the tag and briefly shows a notice.
+# ---------------------------------------------------------------------------
+VK_CODES = {"D": 0x44, "C": 0x43}
+NOTICE_MS = 1500                  # how long the "tag selected" notice stays up
+_watch = {"side": None, "current": None, "available": {}, "prev": {},
+          "timer": None, "notice": None, "notice_timer": None}
+
+
+def key_down(key):
+    """True while the key is held (Revit's UI thread keyboard state)."""
+    if _user32 is not None:
+        return bool(_user32.GetKeyState(VK_CODES[key]) & 0x8000)
+    try:
+        clr.AddReference("PresentationCore")
+        from System.Windows.Input import Keyboard, Key
+        return bool(Keyboard.IsKeyDown(getattr(Key, key)))
+    except Exception:
+        return False
+
+
+def close_notice(sender=None, args=None):
+    t = _watch["notice_timer"]
+    if t is not None:
+        t.Stop()
+        t.Dispose()
+        _watch["notice_timer"] = None
+    f = _watch["notice"]
+    if f is not None:
+        f.Close()
+        f.Dispose()
+        _watch["notice"] = None
+
+
+def show_notice(text):
+    """Small borderless notice by the cursor that closes itself after NOTICE_MS."""
+    close_notice()
+    previous = _user32.GetForegroundWindow() if _user32 is not None else None
+
+    f = Form()
+    f.FormBorderStyle = getattr(FormBorderStyle, "None")
+    f.StartPosition = FormStartPosition.Manual
+    f.TopMost = True
+    f.ShowInTaskbar = False
+    f.BackColor = DrawColor.FromArgb(*HIGHLIGHT_COLOR)
+    f.Padding = Padding(10)
+    lbl = Label()
+    lbl.Text = text
+    lbl.UseMnemonic = False
+    lbl.AutoSize = True
+    lbl.ForeColor = DrawColor.White
+    lbl.Font = Font("Segoe UI", 11.0, FontStyle.Bold)
+    lbl.Location = Point(10, 8)
+    f.Controls.Add(lbl)
+    f.ClientSize = Size(lbl.PreferredWidth + 20, lbl.PreferredHeight + 16)
     pos = Cursor.Position
-    form.Location = Point(pos.X + 24, pos.Y + 24)
-    form.TopMost = True
-    form.ShowInTaskbar = False
-    form.ClientSize = Size(330, 92)
+    f.Location = Point(pos.X + 20, pos.Y + 20)
+    f.Show()
 
-    hint = Label()
-    hint.Text = "D = Description    C = Comments    Enter = repeat    Esc = stop"
-    hint.UseMnemonic = False
-    hint.AutoSize = True
-    hint.Location = Point(10, 10)
-    form.Controls.Add(hint)
+    # Hand focus straight back to Revit so picking carries on.
+    if previous:
+        try:
+            _user32.SetForegroundWindow(previous)
+        except Exception:
+            pass
 
-    buttons = {}
-    results = [DialogResult.Yes, DialogResult.No]
-    for i, (key, name) in enumerate(TAG_SHORTCUTS[side]):
-        btn = Button()
-        # "&D..." underlines the key; pressing it alone clicks the button.
-        btn.Text = "&" + name if name.upper().startswith(key) else "(&" + key + ") " + name
-        btn.Size = Size(155, 40)
-        btn.Location = Point(10 + i * 160, 38)
-        btn.Enabled = name in available
-        btn.DialogResult = results[i]
-        form.Controls.Add(btn)
-        buttons[results[i]] = (name, btn)
+    t = FormsTimer()
+    t.Interval = NOTICE_MS
+    t.Tick += close_notice
+    t.Start()
+    _watch["notice"] = f
+    _watch["notice_timer"] = t
 
-    stop = Button()
-    stop.DialogResult = DialogResult.Cancel
-    stop.Size = Size(0, 0)
-    stop.Location = Point(-10, -10)
-    form.Controls.Add(stop)
-    form.CancelButton = stop
 
-    default = None
-    for name, btn in buttons.values():
-        if btn.Enabled and (default is None or name == last_name):
-            default = btn
-    if default is not None:
-        form.AcceptButton = default
-        form.ActiveControl = default
+def _poll_keys(sender, args):
+    try:
+        for key, name in TAG_SHORTCUTS[_watch["side"]]:
+            down = key_down(key)
+            if down and not _watch["prev"].get(key) and name != _watch["current"]:
+                if name in _watch["available"]:
+                    _watch["current"] = name
+                    show_notice("Tag selected: " + name)
+                else:
+                    show_notice(name + " is not loaded")
+            _watch["prev"][key] = down
+    except Exception:
+        pass
 
-    result = form.ShowDialog()
-    if result in buttons:
-        return buttons[result][0]
-    return None
+
+def start_key_watch(side, available, start_name):
+    _watch.update(side=side, current=start_name, available=available,
+                  prev={k: key_down(k) for k in VK_CODES})
+    t = FormsTimer()
+    t.Interval = 50
+    t.Tick += _poll_keys
+    t.Start()
+    _watch["timer"] = t
+
+
+def stop_key_watch():
+    t = _watch["timer"]
+    if t is not None:
+        t.Stop()
+        t.Dispose()
+        _watch["timer"] = None
+    close_notice()
 
 
 # ---------------------------------------------------------------------------
@@ -495,23 +562,23 @@ def tag_batch(options, tag_types):
     line_u = (u0 + u1) / 2.0
     depth = p0.Subtract(V_ORIGIN).DotProduct(V_NORMAL)
 
-    # 2. Components - click each one, then press D or C for its tag; ESC to finish
+    # 2. Components - click each one; press D or C at any time to switch tag; ESC to finish
     picks = []
-    last_name = options["tag"]
-    while True:
-        prompt = "Click detail component #{0} where the arrow should land (ESC to finish)".format(len(picks) + 1)
-        try:
-            ref = uidoc.Selection.PickObject(ObjectType.Element, DetailItemFilter(), prompt)
-        except RvtExc.OperationCanceledException:
-            break
-        elem = doc.GetElement(ref)
-        u, v = to_uv(pick_point_of(ref, elem))
-        tag_name = ask_tag_shortcut(side, tag_types, last_name, len(picks) + 1)
-        if tag_name is None:
-            break                       # Esc in the popup = stop picking
-        highlight(elem)
-        last_name = tag_name
-        picks.append((v, u, elem, tag_name))
+    start_key_watch(side, tag_types, options["tag"])
+    try:
+        while True:
+            prompt = "[{0}] Click component #{1} where the arrow should land  (D = Description, C = Comments, ESC = finish)".format(
+                _watch["current"], len(picks) + 1)
+            try:
+                ref = uidoc.Selection.PickObject(ObjectType.Element, DetailItemFilter(), prompt)
+            except RvtExc.OperationCanceledException:
+                break
+            elem = doc.GetElement(ref)
+            u, v = to_uv(pick_point_of(ref, elem))
+            picks.append((v, u, elem, _watch["current"]))
+            highlight(elem)
+    finally:
+        stop_key_watch()
     if not picks:
         return "No components picked.", [], []
 
@@ -572,7 +639,7 @@ def main():
 
     all_tags, messages = [], []
     status = ("Draw a vertical detail line, then click 'Pick line & tag'. "
-              "After each component click press D (Description) or C (Comments).")
+              "While picking, press D (Description) or C (Comments) to switch tag.")
     options = load_settings()
     try:
         while True:
