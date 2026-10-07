@@ -8,8 +8,8 @@ Workflow
   3. Pick the side of the line in the dialog.
   4. Click the guide line.
   5. Click each detail component to tag, on the exact spot the arrow should land.
-     Press D (Description tag) or C (Comments tag) at any time to switch the tag
-     used for the following clicks - a notice briefly shows the selected tag.
+     Press D (Description tag) or C (Comments tag) to switch the tag used for
+     the following clicks - a notice shows the selected tag after the next click.
      Picking starts with the Description tag; the dialog only sets the side.
      Picked components turn blue until you click Finish.
      Press ESC (or right-click > Cancel) when finished.
@@ -52,7 +52,6 @@ from System.Windows.Forms import (
 )
 from System.Drawing import Point, Size, Font, FontStyle
 from System.Drawing import Color as DrawColor
-from System.Windows.Forms import Timer as FormsTimer
 
 try:
     import ctypes
@@ -249,52 +248,65 @@ def show_dialog(available, defaults, status=""):
 
 # ---------------------------------------------------------------------------
 # D / C shortcut keys while picking components
-# A WinForms timer keeps ticking while Revit waits for a pick, so it can poll the
-# keyboard. Pressing the other key switches the tag and briefly shows a notice.
+# No timers or windows run while Revit is waiting for a click (that froze
+# picking). Instead the keyboard is checked from the pick filter - which Revit
+# calls as the cursor moves over components - and between clicks. A press is
+# detected from the key's toggle bit, which flips on every key press.
 # ---------------------------------------------------------------------------
 VK_CODES = {"D": 0x44, "C": 0x43}
-NOTICE_MS = 1500                  # how long the "tag selected" notice stays up
-_watch = {"side": None, "current": None, "available": {}, "prev": {},
-          "timer": None, "notice": None, "notice_timer": None}
+_watch = {"side": None, "current": None, "available": {}, "toggle": {},
+          "notified": None, "notice": None}
 
 
-def key_down(key):
-    """True while the key is held (Revit's UI thread keyboard state)."""
-    if _user32 is not None:
-        return bool(_user32.GetKeyState(VK_CODES[key]) & 0x8000)
-    try:
-        clr.AddReference("PresentationCore")
-        from System.Windows.Input import Keyboard, Key
-        return bool(Keyboard.IsKeyDown(getattr(Key, key)))
-    except Exception:
-        return False
+def _key_bits(key):
+    """(held, toggle) for a key from Revit's UI-thread keyboard state."""
+    if _user32 is None:
+        return False, None
+    state = _user32.GetKeyState(VK_CODES[key])
+    return bool(state & 0x8000), state & 0x0001
 
 
-def close_notice(sender=None, args=None):
-    t = _watch["notice_timer"]
-    if t is not None:
-        t.Stop()
-        t.Dispose()
-        _watch["notice_timer"] = None
-    f = _watch["notice"]
+def check_shortcuts():
+    """Switch the current tag if D or C was pressed. Never opens a window."""
+    side = _watch["side"]
+    if side is None:
+        return
+    for key, name in TAG_SHORTCUTS[side]:
+        held, toggle = _key_bits(key)
+        pressed = held or (toggle is not None and toggle != _watch["toggle"].get(key))
+        _watch["toggle"][key] = toggle
+        if pressed and name in _watch["available"]:
+            _watch["current"] = name
+
+
+def start_key_watch(side, available, start_name):
+    _watch.update(side=side, current=start_name, available=available,
+                  notified=start_name,
+                  toggle=dict((k, _key_bits(k)[1]) for k in VK_CODES))
+
+
+def close_notice():
+    f = _watch.get("notice")
     if f is not None:
-        f.Close()
-        f.Dispose()
+        try:
+            f.Close()
+            f.Dispose()
+        except Exception:
+            pass
         _watch["notice"] = None
 
 
 def show_notice(text):
-    """Small borderless notice by the cursor that closes itself after NOTICE_MS."""
+    """Small notice by the cursor. Shown between clicks only; it closes on the
+    next click (or when picking ends)."""
     close_notice()
     previous = _user32.GetForegroundWindow() if _user32 is not None else None
-
     f = Form()
     f.FormBorderStyle = getattr(FormBorderStyle, "None")
     f.StartPosition = FormStartPosition.Manual
     f.TopMost = True
     f.ShowInTaskbar = False
     f.BackColor = DrawColor.FromArgb(*HIGHLIGHT_COLOR)
-    f.Padding = Padding(10)
     lbl = Label()
     lbl.Text = text
     lbl.UseMnemonic = False
@@ -307,54 +319,17 @@ def show_notice(text):
     pos = Cursor.Position
     f.Location = Point(pos.X + 20, pos.Y + 20)
     f.Show()
-
-    # Hand focus straight back to Revit so picking carries on.
     if previous:
         try:
-            _user32.SetForegroundWindow(previous)
+            _user32.SetForegroundWindow(previous)   # keep Revit active for picking
         except Exception:
             pass
-
-    t = FormsTimer()
-    t.Interval = NOTICE_MS
-    t.Tick += close_notice
-    t.Start()
     _watch["notice"] = f
-    _watch["notice_timer"] = t
-
-
-def _poll_keys(sender, args):
-    try:
-        for key, name in TAG_SHORTCUTS[_watch["side"]]:
-            down = key_down(key)
-            if down and not _watch["prev"].get(key) and name != _watch["current"]:
-                if name in _watch["available"]:
-                    _watch["current"] = name
-                    show_notice("Tag selected: " + name)
-                else:
-                    show_notice(name + " is not loaded")
-            _watch["prev"][key] = down
-    except Exception:
-        pass
-
-
-def start_key_watch(side, available, start_name):
-    _watch.update(side=side, current=start_name, available=available,
-                  prev={k: key_down(k) for k in VK_CODES})
-    t = FormsTimer()
-    t.Interval = 50
-    t.Tick += _poll_keys
-    t.Start()
-    _watch["timer"] = t
 
 
 def stop_key_watch():
-    t = _watch["timer"]
-    if t is not None:
-        t.Stop()
-        t.Dispose()
-        _watch["timer"] = None
     close_notice()
+    _watch["side"] = None
 
 
 # ---------------------------------------------------------------------------
@@ -382,6 +357,10 @@ class DetailItemFilter(ISelectionFilter):
     __namespace__ = _NS
 
     def AllowElement(self, elem):
+        try:
+            check_shortcuts()               # D / C pressed while hovering?
+        except Exception:
+            pass
         try:
             return cat_is(elem, BuiltInCategory.OST_DetailComponents)
         except Exception:
@@ -563,10 +542,15 @@ def tag_batch(options, tag_types):
                 ref = uidoc.Selection.PickObject(ObjectType.Element, DetailItemFilter(), prompt)
             except RvtExc.OperationCanceledException:
                 break
+            close_notice()
+            check_shortcuts()
             elem = doc.GetElement(ref)
             u, v = to_uv(pick_point_of(ref, elem))
             picks.append((v, u, elem, _watch["current"]))
             highlight(elem)
+            if _watch["current"] != _watch["notified"]:
+                _watch["notified"] = _watch["current"]
+                show_notice("Tag selected: " + _watch["current"])
     finally:
         stop_key_watch()
     if not picks:
