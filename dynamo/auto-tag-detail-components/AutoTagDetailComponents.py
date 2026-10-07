@@ -483,13 +483,18 @@ def force_rerun_next_time():
         clr.AddReference("DynamoRevitDS")
         import Dynamo
         workspace = Dynamo.Applications.DynamoRevit().RevitDynamoModel.CurrentWorkspace
+        # CPython3 hands enums back as ints: Manual = 0, Automatic = 1, Periodic = 2
         run_type = str(workspace.RunSettings.RunType)
-        if "Automatic" in run_type:
-            return "Re-run: skipped (graph is in Automatic mode - switch to Manual)."
+        run_type = {"0": "Manual", "1": "Automatic", "2": "Periodic"}.get(run_type, run_type)
+        if run_type != "Manual":
+            return "Re-run: skipped ({0} mode) - switch the graph to Manual.".format(run_type)
         marked = 0
         for node in workspace.Nodes:
-            code = getattr(node, "Code", None) or ""
-            if "force_rerun_next_time" in code:
+            # Read the Python code via reflection so it works whatever type the
+            # Python engine wraps the node as.
+            prop = node.GetType().GetProperty("Script")
+            code = prop.GetValue(node, None) if prop is not None else None
+            if code and "def force_rerun_next_time" in str(code):
                 node.MarkNodeAsModified(True)
                 marked += 1
         return "Re-run: marked {0} node(s) for next run ({1} mode).".format(marked, run_type)
